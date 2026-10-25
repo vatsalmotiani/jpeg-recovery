@@ -98,7 +98,7 @@ date the photo was taken (from its EXIF data), or `recovered_00001.jpg`. File da
 | Card not listed | Re-insert it and click **Refresh list**. Try another USB port or card reader. A card reader with no card in it isn't listed. |
 | "Permission denied" | Quit, open the app again, and enter your Mac password when asked. |
 | Browser didn't open | Open the app again; it reopens the page. |
-| No photos found, or fewer than expected | In Terminal, run `cd jpeg-recovery && git pull && sudo python3 diagnose.py`. It takes about a minute, checks what is on the card (JPEG, HEIC, encrypted, wiped) and why, and saves **jpeg-recovery-report.txt** to your Desktop. Send that file when asking for help. The app also keeps a log at `~/Library/Logs/JPEG Recovery/scan.log`. |
+| No photos found, or fewer than expected | Double-click **Diagnose Card.command** in the project folder, or in Terminal run `cd jpeg-recovery && git pull && ./diagnose.sh`. It takes about a minute, checks what is on the card (JPEG, HEIC, encrypted, wiped) and why, and saves **jpeg-recovery-report.txt** to your Desktop. Send that file when asking for help. The app also keeps a log at `~/Library/Logs/JPEG Recovery/scan.log`. |
 | Prefer Terminal? | `./run.sh` in the project folder does the same thing. |
 
 ## Privacy and safety
