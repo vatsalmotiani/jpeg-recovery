@@ -268,7 +268,8 @@ class ApiTests(unittest.TestCase):
             with open(img, "wb") as f:
                 f.write(blob)
             port = 18000 + random.randint(0, 2000)
-            env = dict(os.environ, JPEG_RECOVERY_PORT=str(port), JPEG_RECOVERY_NO_BROWSER="1")
+            env = dict(os.environ, JPEG_RECOVERY_PORT=str(port), JPEG_RECOVERY_NO_BROWSER="1",
+                       JPEG_RECOVERY_LOG=os.path.join(tmp, "scan.log"))
             app = os.path.join(os.path.dirname(HERE), "JPEG Recovery.app", "Contents", "Resources", "app.py")
             proc = subprocess.Popen([sys.executable, "-I", app], env=env,
                                     stdout=subprocess.PIPE, text=True)

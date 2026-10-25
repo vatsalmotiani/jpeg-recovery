@@ -17,7 +17,7 @@ import re
 import struct
 import threading
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 
 import fsmeta
 
@@ -384,6 +384,7 @@ class Scanner:
         self.cancelled = False
         self.done = False
         self.error = None
+        self.stats = Counter()  # diagnostics: candidates checked and why they were rejected
         self._lock = threading.Lock()
         self.recs = []
         self._fs_by_start = {}
@@ -392,6 +393,9 @@ class Scanner:
 
     def cancel(self):
         self.cancelled = True
+
+    def log(self, msg):
+        """Overridden by the app to write to its log file."""
 
     def snapshot(self, since):
         with self._lock:
@@ -420,6 +424,13 @@ class Scanner:
         except Exception:
             recs = []
         recs = [r for r in recs if not r.name.startswith("._")]  # macOS metadata files
+        self.log("file system: %s; JPEG entries: %d existing, %d deleted" % (
+            ", ".join(self.volumes) or "none readable", sum(not r.deleted for r in recs),
+            sum(r.deleted for r in recs)))
+        for r in recs[:5]:
+            self.log("  entry %s%s size %d at %d (%s, %d piece(s)) first bytes %s" % (
+                r.folder.rstrip("/") + "/", r.name, r.size, r.start,
+                "deleted" if r.deleted else "existing", len(r.extents), self.src.get(r.start, 8).hex(" ")))
         recs.sort(key=lambda r: r.deleted)  # existing files win over deleted ones at the same place
         for r in recs:
             self._fs_by_start.setdefault(r.start, r)
@@ -462,10 +473,12 @@ class Scanner:
                 if info is not None or n >= rec.size:
                     break
             if info is None:
+                self.stats["existing entry not a valid JPEG header"] += 1
                 continue  # damaged/not really a JPEG: let the deep scan decide
             info["start"] = rec.start
             self._add(info, rec, rec.extents)
             self._known[rec.start] = rec.extents[0][1]
+        self.log("listed %d existing photos from the file system" % len(self.found))
 
     # -- pass 2
     def _deep_pass(self):
@@ -498,8 +511,15 @@ class Scanner:
                         break
                     local = end - cstart
                     continue
-                info = parse_jpeg(src, p)
+                why = []
+                info = parse_jpeg(src, p, why)
+                self.stats["checked"] += 1
                 if info is None:
+                    self.stats["rejected: " + (why[0] if why else "?")] += 1
+                    if self.stats["logged_rejects"] < 20:
+                        self.stats["logged_rejects"] += 1
+                        self.log("rejected candidate at %d: %s; bytes %s" % (
+                            p, why[0] if why else "?", src.get(p, 12).hex(" ")))
                     local = k + 1
                     continue
                 rec = self._match(p)

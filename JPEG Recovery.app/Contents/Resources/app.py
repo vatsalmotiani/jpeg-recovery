@@ -149,6 +149,58 @@ def source_size(path):
     return source_geometry(path)[0]
 
 
+# ---------------------------------------------------------------- logging
+def log_path():
+    if os.environ.get("JPEG_RECOVERY_LOG"):
+        return os.environ["JPEG_RECOVERY_LOG"]
+    home = real_user()[2]
+    return os.path.join(home, "Library", "Logs", "JPEG Recovery", "scan.log")
+
+
+_LOG_LOCK = threading.Lock()
+
+
+def log(msg):
+    """Append to the log file (sent with diagnose.py) and print to the terminal."""
+    line = "%s %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg)
+    print("  " + line, flush=True)
+    with _LOG_LOCK:
+        try:
+            path = log_path()
+            uid, gid, _ = real_user()
+            new_dir = not os.path.isdir(os.path.dirname(path))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if new_dir:
+                _chown(os.path.dirname(path), uid, gid)
+            if os.path.exists(path) and os.path.getsize(path) > 5 << 20:
+                os.replace(path, path + ".old")
+            new = not os.path.exists(path)
+            with open(path, "a") as f:
+                f.write(line + "\n")
+            if new:
+                _chown(path, uid, gid)
+        except OSError:
+            pass
+
+
+def _monitor(sc):
+    """Log scan progress every 15 seconds and a summary at the end."""
+    last = 0
+    while True:
+        done = sc.done
+        if done or time.time() - last >= 15:
+            last = time.time()
+            el = max(time.time() - sc.started, 0.001)
+            stats = {k: v for k, v in sc.stats.items() if k != "logged_rejects"}
+            log("[%s] %s: %.2f / %.2f GB, %.1f MB/s, found %d, unreadable %d KB, %s%s" % (
+                "done" if done else "scan", sc.phase, sc.scanned / 1e9, sc.src.size / 1e9,
+                sc.scanned / el / 1e6, len(sc.found), sc.src.bad_bytes // 1024, stats,
+                (", error: %s" % sc.error) if sc.error else ""))
+        if done:
+            return
+        time.sleep(1)
+
+
 # ---------------------------------------------------------------- scanning
 def unmount_device(path):
     """Unmount all volumes of the device so macOS stops writing to it."""
@@ -197,10 +249,14 @@ def start_scan(path, unmount=False):
         if STATE["source"]:
             STATE["source"].close()
         sc = carver.Scanner(src)
+        sc.log = log
         sc.note = note
         sc.started = time.time()
         STATE.update(scanner=sc, source=src, label=path, recover=None, gen=STATE["gen"] + 1)
+    log("=== scan started: %s, %.2f GB, sector %d, macOS %s, unmount: %s" % (
+        path, size / 1e9, sector, os.uname().release, note or "not requested"))
     threading.Thread(target=sc.run, daemon=True).start()
+    threading.Thread(target=_monitor, args=(sc,), daemon=True).start()
 
 
 def _item_json(f):
@@ -391,6 +447,9 @@ def _recover_worker(rec, src, items, dest, uid, gid):
         rec["failed"] = rec["total"] - rec["saved"]
     finally:
         rec["done"] = True
+        log("save finished: %d saved, %d failed, %d with unreadable parts, to %s%s" % (
+            rec["saved"], rec["failed"], rec["damaged"], dest,
+            (", error: %s" % rec["error"]) if rec["error"] else ""))
 
 
 # ---------------------------------------------------------------- HTTP

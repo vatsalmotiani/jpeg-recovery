@@ -4,7 +4,8 @@
     sudo python3 diagnose.py              (auto-picks the card if only one is plugged in)
     sudo python3 diagnose.py /dev/rdisk4
 
-Read-only. Takes about 30 seconds. Paste the output when asking for help.
+Read-only. Takes about a minute. Saves a report to your Desktop
+(jpeg-recovery-report.txt): send that file when asking for help.
 """
 
 import collections
@@ -20,7 +21,8 @@ import carver  # noqa: E402
 import fsmeta  # noqa: E402
 
 MiB = 1 << 20
-HEAD_BYTES = 1024 * MiB     # read the first 1 GiB fully
+HEAD_BYTES = 256 * MiB      # read the first 256 MiB fully
+TRIAL_BYTES = 1024 * MiB    # run the real scanner over the first 1 GiB
 SAMPLES = 48                # plus this many 4 MiB samples spread over the rest
 OTHER = [  # (label, test(bytes at a sector start))
     ("HEIC/HEIF photo (iPhone/Android)", lambda b: b[4:8] == b"ftyp" and b[8:12] in (b"heic", b"heix", b"mif1", b"msf1", b"hevc", b"heim", b"heis", b"avif")),
@@ -29,6 +31,33 @@ OTHER = [  # (label, test(bytes at a sector start))
     ("Canon CR3 / Fuji RAF", lambda b: b[4:12] == b"ftypcrx " or b[:8] == b"FUJIFILM"),
     ("PNG image", lambda b: b[:8] == b"\x89PNG\r\n\x1a\n"),
 ]
+
+
+class Tee:
+    """Print to the terminal and collect everything for the report file."""
+
+    def __init__(self, stream):
+        self.stream, self.parts = stream, []
+
+    def write(self, s):
+        self.stream.write(s)
+        if "\r" not in s:
+            self.parts.append(s)
+
+    def flush(self):
+        self.stream.flush()
+
+
+def save_report(text):
+    uid = int(os.environ.get("SUDO_UID") or os.getuid())
+    gid = int(os.environ.get("SUDO_GID") or os.getgid())
+    home = app.pwd.getpwuid(uid).pw_dir
+    path = os.environ.get("JPEG_RECOVERY_REPORT") or os.path.join(home, "Desktop", "jpeg-recovery-report.txt")
+    with open(path, "w") as f:
+        f.write(text)
+    if os.geteuid() == 0:
+        os.chown(path, uid, gid)
+    return path
 
 
 def pick_device():
@@ -45,8 +74,33 @@ def pick_device():
 
 
 def main():
+    tee = Tee(sys.stdout)
+    sys.stdout = tee
+    try:
+        run()
+    except Exception:
+        import traceback
+        traceback.print_exc(file=tee)
+    finally:
+        sys.stdout = tee.stream
+        try:
+            print("\nReport saved to: %s\nPlease send that file." % save_report("".join(tee.parts)))
+        except OSError as e:
+            print("\nCould not save the report (%s). Please copy the text above instead." % e)
+
+
+def git_version():
+    try:
+        return app.subprocess.run(["git", "-C", HERE, "log", "-1", "--format=%h %cd"],
+                                  capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+def run():
     path = pick_device()
     print("JPEG Recovery diagnostics\n=========================")
+    print("Version: %s" % git_version())
     print("macOS %s, Python %s, running as %s" % (
         os.uname().release, sys.version.split()[0], "root" if os.geteuid() == 0 else "normal user (use sudo!)"))
     try:
@@ -59,8 +113,30 @@ def main():
     m = app.re.match(r"r?(disk\d+)", os.path.basename(path))
     if m:
         info = app._diskutil_plist("info", m.group(1))
-        print("Device: %s, %s, %s" % (info.get("MediaName"), info.get("BusProtocol"),
-                                      "removable" if info.get("RemovableMedia") else "fixed"))
+        print("Device: %s, %s, %s, mounted volumes: %s" % (
+            info.get("MediaName"), info.get("BusProtocol"),
+            "removable" if info.get("RemovableMedia") else "fixed", app._volumes_of(path) or "none"))
+        lst = app._diskutil_plist("list", m.group(1))
+        for e in lst.get("AllDisksAndPartitions", []):
+            for part in e.get("Partitions", []):
+                print("  partition %s: %s, %.2f GB, %s" % (part.get("DeviceIdentifier"), part.get("Content"),
+                      part.get("Size", 0) / 1e9, part.get("VolumeName") or ""))
+
+    # ---- read test
+    print("\n[0] Read test")
+    t0 = time.time()
+    test = carver.Source(path, size, sector)
+    got = 0
+    try:
+        for off in range(0, min(size, 64 * MiB), MiB):
+            got += len(test._pread(MiB, off))
+        dt = max(time.time() - t0, 0.001)
+        print("  64 MB sequential read: %.1f MB/s, unreadable %d KB" % (got / dt / 1e6, test.bad_bytes // 1024))
+        sample = test._pread(4096, 0)
+        print("  first 4 KB: %d zero bytes, starts %s" % (sample.count(0), sample[:16].hex(" ")))
+    except OSError as e:
+        print("  READ FAILED: %s" % e)
+    test.close()
 
     # ---- file system
     print("\n[1] File system")
@@ -144,8 +220,9 @@ def main():
                 k = data.find(carver.SIG, k + 1)
             sys.stdout.write("\r  read %d / %d MB" % (done // MiB, total // MiB))
             sys.stdout.flush()
-    print("\r  Read %d MB in %.0fs (%.0f MB/s)%s" % (done // MiB, time.time() - t0,
-          done / MiB / max(time.time() - t0, 0.01), " " * 20))
+    sys.stdout.write("\r" + " " * 40 + "\r")
+    print("  Read %d MB in %.0fs (%.0f MB/s)" % (done // MiB, time.time() - t0,
+          done / MiB / max(time.time() - t0, 0.01)))
     if src.bad_bytes:
         print("  UNREADABLE (bad) areas: %d KB" % (src.bad_bytes // 1024))
     print("  1 MB blocks: %d all-zero, %d all-FF (erased), %d random-looking, %d other" % (
@@ -159,10 +236,34 @@ def main():
     if other:
         print("  Other file types seen: %s" % ", ".join("%s x%d" % kv for kv in other.most_common()))
 
+    # ---- the real scanner, on the first part of the card
+    print("\n[2b] Real scanner on the first %d MB" % (min(size, TRIAL_BYTES) // MiB))
+    trial = carver.Source(path, min(size, TRIAL_BYTES), sector)
+    sc = carver.Scanner(trial)
+    sc.log = lambda msg: print("  log: " + msg)
+    t0 = time.time()
+    sc.run()
+    print("  finished in %.0fs, found %d photos, error: %s" % (time.time() - t0, len(sc.found), sc.error))
+    print("  stats: %s" % {k: v for k, v in sc.stats.items() if k != "logged_rejects"})
+    for f in sc.found[:5]:
+        print("    %s (%s) %dx%d %d KB at %d" % (f["name"] or "(no name)", f["status"], f["width"],
+              f["height"], f["length"] // 1024, f["extents"][0][0]))
+    trial.close()
+
+    # ---- the app's own log from earlier scans
+    lp = app.log_path()
+    print("\n[4] App log (%s)" % lp)
+    try:
+        with open(lp) as f:
+            lines = f.readlines()
+        print("".join("  " + ln for ln in lines[-150:]).rstrip() or "  (empty)")
+    except OSError:
+        print("  (no log yet: scans made with versions before today don't write one)")
+
     # ---- verdict
     print("\n[3] Verdict")
     nz = blocks - zero - ff
-    if good or any(not r.deleted for r in jpg):
+    if good or sc.found or any(not r.deleted for r in jpg):
         print("  JPEG photos ARE present. If the app shows none, that's a bug: please send this output.")
     elif blocks and zero + ff >= blocks * 0.95:
         print("  The sampled card areas are empty (all zeros/FF). The card was probably erased/TRIMmed")
