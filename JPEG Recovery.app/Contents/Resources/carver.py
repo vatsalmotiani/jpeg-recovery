@@ -256,7 +256,13 @@ def _mpf_end(seg, seg_abs):
         return None
 
 
-def parse_jpeg(src, p):
+def _fail(why, msg):
+    if why is not None:
+        why.append(msg)
+    return None
+
+
+def parse_jpeg(src, p, why=None, header_only=False):
     """Validate a JPEG starting at offset p of `src`.
 
     Returns a dict (start, length, width, height, orientation, thumb_rel,
@@ -264,7 +270,7 @@ def parse_jpeg(src, p):
     """
     head = src.get(p, 4)
     if len(head) < 4 or head[:3] != SIG or head[3] not in FIRST_OK:
-        return None
+        return _fail(why, 'not a JPEG start (FF D8 FF + valid marker)')
     limit = p + MAX_JPEG
     pos = p + 2
     seen_sof = seen_sos = after_scan = exif_done = False
@@ -272,28 +278,28 @@ def parse_jpeg(src, p):
     orientation, thumb_rel, thumb_len, date, mpf_end = 1, None, 0, None, None
     while True:
         if pos >= limit:
-            return None
+            return _fail(why, 'bigger than the size limit')
         b = src.get(pos, 4)
         if len(b) < 2 or b[0] != 0xFF:
-            return None
+            return _fail(why, 'structure broken (expected a marker)')
         m = b[1]
         while m == 0xFF:  # fill bytes
             pos += 1
             b = src.get(pos, 4)
             if len(b) < 2:
-                return None
+                return _fail(why, 'ran off the end of the drive')
             m = b[1]
         if after_scan and m not in AFTER_SCAN_OK:
-            return None
+            return _fail(why, 'invalid marker after image data (damaged/overwritten)')
         if not seen_sos and m not in HEADER_OK and m != 0xD9:
-            return None
+            return _fail(why, 'invalid marker in header')
         after_scan = False
         if m == 0xD9:  # EOI
             end = pos + 2
             if not (seen_sof and seen_sos) or end - p < MIN_JPEG:
-                return None
+                return _fail(why, 'no image frame/scan before end, or under 1 KB')
             if width < MIN_DIM or height < MIN_DIM:
-                return None
+                return _fail(why, 'image smaller than 16x16')
             if mpf_end and end < mpf_end <= limit and src.get(end, 3) == SIG:
                 tail = src.get(mpf_end - 2, 2)
                 if tail == b"\xff\xd9":
@@ -304,17 +310,17 @@ def parse_jpeg(src, p):
                 "exif_date": date,
             }
         if len(b) < 4:
-            return None
+            return _fail(why, 'ran off the end of the drive')
         seg_len = _u16(b, 2)
         if seg_len < 2:
-            return None
+            return _fail(why, 'invalid segment length')
         if m in SOF:
             seg = src.get(pos + 4, 6)
             if seg_len < 8 or len(seg) < 5:
-                return None
+                return _fail(why, 'bad frame header')
             height, width = _u16(seg, 1), _u16(seg, 3)
             if height == 0 or width == 0:
-                return None
+                return _fail(why, 'zero width/height')
             seen_sof = True
         elif m == 0xE1 and not exif_done:
             seg = src.get(pos + 4, seg_len - 2)
@@ -328,10 +334,18 @@ def parse_jpeg(src, p):
             mpf_end = _mpf_end(seg, pos + 4)
         if m == 0xDA:  # start of scan -> skip entropy-coded data
             if not seen_sof:
-                return None
+                return _fail(why, 'image data before frame header')
+            if header_only:
+                if width < MIN_DIM or height < MIN_DIM:
+                    return _fail(why, 'image smaller than 16x16')
+                return {
+                    "start": p, "length": None, "width": width, "height": height,
+                    "orientation": orientation, "thumb_rel": thumb_rel, "thumb_len": thumb_len,
+                    "exif_date": date,
+                }
             pos = _skip_entropy(src, pos + 2 + seg_len, limit)
             if pos is None:
-                return None
+                return _fail(why, 'image data never ends (overwritten, zero-filled, or stored in pieces)')
             seen_sos = True
             after_scan = True
             continue
@@ -374,6 +388,7 @@ class Scanner:
         self.recs = []
         self._fs_by_start = {}
         self._fs_used = set()
+        self._known = {}  # start offset -> bytes to skip, for photos already listed
 
     def cancel(self):
         self.cancelled = True
@@ -385,6 +400,7 @@ class Scanner:
     def run(self):
         try:
             self._fs_pass()
+            self._existing_pass()
             self._deep_pass()
             if not self.cancelled:
                 self._fs_only_pass()
@@ -426,6 +442,31 @@ class Scanner:
             item["id"] = len(self.found)
             self.found.append(item)
 
+    # -- pass 1b
+    def _existing_pass(self):
+        """List photos the file system says exist right away, instead of waiting
+        for the deep scan to reach their position on the card."""
+        self.phase = "Listing existing photos"
+        for rec in sorted(self.recs, key=lambda r: r.start):
+            if self.cancelled:
+                return
+            if rec.deleted or not rec.exact or not (MIN_JPEG <= rec.size <= MAX_JPEG):
+                continue
+            if rec.start in self._known:
+                continue
+            tmp = {"extents": rec.extents, "length": rec.size}
+            info = None
+            for n in (128 << 10, 2 << 20):  # header is normally in the first 128 KB
+                head = read_item(self.src, tmp, 0, min(n, rec.size))
+                info = parse_jpeg(BufSource(head), 0, header_only=True)
+                if info is not None or n >= rec.size:
+                    break
+            if info is None:
+                continue  # damaged/not really a JPEG: let the deep scan decide
+            info["start"] = rec.start
+            self._add(info, rec, rec.extents)
+            self._known[rec.start] = rec.extents[0][1]
+
     # -- pass 2
     def _deep_pass(self):
         self.phase = "Deep scan"
@@ -448,6 +489,14 @@ class Scanner:
                 p = cstart + k
                 if p % ALIGN:
                     local = k + 1
+                    continue
+                if p in self._known:  # already listed from the file system
+                    end = p + self._known[p]
+                    end += -end % ALIGN
+                    if end >= cstart + chunk:
+                        next_i = end
+                        break
+                    local = end - cstart
                     continue
                 info = parse_jpeg(src, p)
                 if info is None:
@@ -478,7 +527,7 @@ class Scanner:
         together (stored in fragments)."""
         self.phase = "Checking fragmented files"
         with self._lock:
-            starts = {it["extents"][0][0] for it in self.found}
+            starts = {it["extents"][0][0] for it in self.found} | set(self._known)
         for rec in self.recs:
             if self.cancelled:
                 return
