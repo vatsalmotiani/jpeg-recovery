@@ -10,7 +10,7 @@
     --line: #e3e3e8; --line-strong: #d2d2d7; --accent: #0a66d6; --accent-soft: #e8f1fd;
     --accent-text: #ffffff; --danger: #d12c2c; --danger-soft: #fdecec; --ok: #1b8a43;
     --ok-soft: #e7f6ec; --warn: #a15c00; --warn-soft: #fff4e0; --tile: #ececf0;
-    --deleted: #d12c2c; --existing: #1b8a43; --deep: #6e6e73;
+    --deleted: #d12c2c; --existing: #1b8a43; --deep: #6e6e73; --embedded: #7a4fd6;
     --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.06);
     --tile-size: 168px;
   }
@@ -20,7 +20,7 @@
       --line: #2e2e33; --line-strong: #3a3a40; --accent: #3d8bfd; --accent-soft: #1b2b44;
       --danger: #ff6b6b; --danger-soft: #3a1d1f; --ok: #4cd07d; --ok-soft: #173123;
       --warn: #ffb74d; --warn-soft: #3a2c14; --tile: #2a2a2f;
-      --deleted: #ff6b6b; --existing: #4cd07d; --deep: #a1a1a6;
+      --deleted: #ff6b6b; --existing: #4cd07d; --deep: #a1a1a6; --embedded: #a98bff;
       --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.3);
     }
   }
@@ -150,7 +150,7 @@
   .tile .badge { position: absolute; top: 9px; right: 9px; font-size: 10.5px; font-weight: 650; padding: 2px 7px;
                  border-radius: 99px; color: #fff; letter-spacing: .02em; }
   .badge.deleted { background: var(--deleted); } .badge.existing { background: var(--existing); }
-  .badge.unknown { background: rgba(0,0,0,.55); }
+  .badge.unknown { background: rgba(0,0,0,.55); } .badge.embedded { background: var(--embedded); }
   .tile .cap { padding: 7px 9px 8px; }
   .tile .nm { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tile .mt { font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
@@ -277,7 +277,7 @@
       <div class="mapwrap"><canvas id="map" aria-label="Map of the card: scanned area and where photos were found"></canvas></div>
       <div class="maplegend">
         <span>Card map: start → end</span>
-        <span><span class="dot" style="background:var(--deleted)"></span>Deleted<span class="dot" style="background:var(--existing)"></span>Existing<span class="dot" style="background:var(--deep)"></span>Deep scan</span>
+        <span><span class="dot" style="background:var(--deleted)"></span>Deleted<span class="dot" style="background:var(--existing)"></span>Existing<span class="dot" style="background:var(--deep)"></span>Deep scan<span class="dot" style="background:var(--embedded)"></span>Inside files</span>
       </div>
       <div class="alert info" id="pnote"></div>
       <div class="alert warn" id="pwarn"></div>
@@ -290,6 +290,7 @@
         <button class="chip" data-f="deleted">Deleted <span class="n" id="cDeleted">0</span></button>
         <button class="chip" data-f="existing">Existing <span class="n" id="cExisting">0</span></button>
         <button class="chip" data-f="unknown">Deep scan <span class="n" id="cUnknown">0</span></button>
+        <button class="chip" data-f="embedded" title="Smaller copies found inside other files, e.g. a phone's thumbnail cache or a video/RAW preview. Often the only copy left of a deleted photo.">Inside files <span class="n" id="cEmbedded">0</span></button>
       </div>
       <span class="grow"></span>
       <select id="sort" title="Sort photos">
@@ -395,7 +396,10 @@ function fmtTime(s) {
 }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function prettyDate(d) { return d ? d.slice(0, 10).replace(/:/g, "-") + " " + d.slice(11, 16) : ""; }
-function label(it) { return it.name || (it.date ? "Photo " + prettyDate(it.date) : "Photo " + (it.id + 1)); }
+function label(it) {
+  const kind = it.status === "embedded" ? "Preview" : "Photo";
+  return it.name || (it.date ? kind + " " + prettyDate(it.date) : kind + " " + (it.id + 1));
+}
 function dateKey(it) {
   if (it.date) return it.date;
   if (it.mtime) { const d = new Date(it.mtime * 1000); return d.toISOString().slice(0, 19).replace("T", " ").replace(/-/g, ":"); }
@@ -547,7 +551,7 @@ function drawMap(s) {
   g.fillStyle = cssVar("--tile"); g.fillRect(0, 0, w, h);
   const total = s.total || 1;
   g.fillStyle = cssVar("--accent-soft"); g.fillRect(0, 0, w * Math.min(1, s.scanned / total), h);
-  const colors = { deleted: cssVar("--deleted"), existing: cssVar("--existing"), unknown: cssVar("--deep") };
+  const colors = { deleted: cssVar("--deleted"), existing: cssVar("--existing"), unknown: cssVar("--deep"), embedded: cssVar("--embedded") };
   for (const it of items) {
     g.fillStyle = colors[it.status] || colors.unknown;
     g.fillRect(Math.min(w - 2, Math.floor(w * it.offset / total)), 4, 2, h - 8);
@@ -586,7 +590,7 @@ function addItem(it) {
   const el = document.createElement("div");
   el.className = "tile"; el.tabIndex = 0; el.dataset.id = it.id;
   const rot = it.has_thumb && it.orientation > 1 ? "o" + it.orientation : "";
-  const badge = { deleted: "Deleted", existing: "Existing", unknown: "Deep scan" }[it.status] || "";
+  const badge = { deleted: "Deleted", existing: "Existing", unknown: "Deep scan", embedded: "Inside file" }[it.status] || "";
   const where = it.name && it.folder && it.folder !== "/" ? it.folder + "/" : "";
   el.title = (where + label(it)) + (it.date ? "\nTaken " + prettyDate(it.date) : "") + (it.pieces > 1 ? "\nRebuilt from " + it.pieces + " pieces" : "");
   el.innerHTML = '<div class="ph"><img loading="lazy" decoding="async" alt="" class="' + rot + '" src="/thumb/' + it.id +
@@ -635,10 +639,11 @@ function visibleOrder() {
   return [...$("grid").children].filter(el => !el.classList.contains("hidden")).map(el => +el.dataset.id);
 }
 function updateCounts() {
-  const n = { all: 0, deleted: 0, existing: 0, unknown: 0 };
+  const n = { all: 0, deleted: 0, existing: 0, unknown: 0, embedded: 0 };
   for (const it of items) if (it) { n.all++; n[it.status] = (n[it.status] || 0) + 1; }
   $("cAll").textContent = n.all; $("cDeleted").textContent = n.deleted;
   $("cExisting").textContent = n.existing; $("cUnknown").textContent = n.unknown;
+  $("cEmbedded").textContent = n.embedded;
   $("sFound").textContent = n.all.toLocaleString();
 }
 document.querySelectorAll(".chip").forEach(ch => ch.onclick = () => {
@@ -703,7 +708,7 @@ function showViewer() {
   $("lbloading").textContent = "Loading full resolution…";
   img.src = "/img/" + id + "?g=" + state.gen + "&t=" + T;
   $("lbname").textContent = label(it);
-  const bits = [it.width + "×" + it.height, fmtSize(it.length), { deleted: "Deleted", existing: "Existing", unknown: "Found by deep scan" }[it.status]];
+  const bits = [it.width + "×" + it.height, fmtSize(it.length), { deleted: "Deleted", existing: "Existing", unknown: "Found by deep scan", embedded: "Found inside another file (thumbnail/preview copy)" }[it.status]];
   if (it.date) bits.push("taken " + prettyDate(it.date));
   if (it.name && it.folder && it.folder !== "/") bits.push(it.folder);
   if (it.pieces > 1) bits.push("rebuilt from " + it.pieces + " pieces");

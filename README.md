@@ -73,11 +73,17 @@ It works like professional tools such as Disk Drill and PhotoRec, in two passes:
 1. **File-system pass (quick).** Reads the card's partition table (MBR, GPT or none) and its
    FAT16/FAT32/exFAT folders, including deleted entries. This gives original names, folders and
    dates, the exact file size, and the location of every piece of a fragmented file.
+   While scanning, it also looks for **lost folders**: folders a quick format left behind on the
+   card. These bring back original names and list photos **as soon as the folder is found**,
+   even if the photos themselves are much further into the card.
 2. **Deep scan (whole card).** Reads every sector and finds JPEGs by following their internal
    structure from start to end. This finds photos even after the file system is gone (formatted
    card, corrupted card, HFS+/APFS pendrives). Like PhotoRec, it only looks where files can start
    (sector boundaries). That skips the preview images hidden inside RAW files and avoids junk results.
-   Multi-image JPEGs (Android Ultra HDR, MPO) are kept whole.
+   Multi-image JPEGs (Android Ultra HDR, MPO) are kept whole. JPEGs found **inside other files**,
+   such as a phone's hidden thumbnail cache or the preview inside a video/RAW file, are recovered
+   too and labelled **Inside file**. These are smaller copies, but often the only copy left of a
+   deleted photo.
 
 Saved files are named after the original file when it's known. Otherwise they're named after the
 date the photo was taken (from its EXIF data), or `recovered_00001.jpg`. File dates are restored too.

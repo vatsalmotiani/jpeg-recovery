@@ -193,12 +193,14 @@ class CarverTests(unittest.TestCase):
         src.close()
 
 
-    def test_ignores_jpegs_embedded_inside_other_files(self):
-        # e.g. the preview JPEG inside a camera RAW file is not sector aligned
-        good, embedded = self.photos[0], self.photos[2]
-        path = self.build_image([(4096, good), (2 * MiB + 77, embedded)], 4 * MiB)
-        _, src, out = scan(path)
-        self.assertEqual([sha(good)], [sha(o) for o in out])
+    def test_finds_jpegs_inside_other_files_and_labels_them(self):
+        # e.g. an Android thumbnail cache or the preview inside a RAW/video file:
+        # not on a sector boundary, still worth recovering, but labelled.
+        good, embedded, icon = self.photos[0], self.photos[2], photo(40, 40, 77)
+        path = self.build_image([(4096, good), (2 * MiB + 77, embedded), (3 * MiB + 5, icon)], 4 * MiB)
+        sc, src, out = scan(path)
+        self.assertEqual([sha(good), sha(embedded)], [sha(o) for o in out])  # tiny icon ignored
+        self.assertEqual([f["status"] for f in sc.found], ["unknown", "embedded"])
         src.close()
 
     def test_ultra_hdr_mpf_kept_whole(self):

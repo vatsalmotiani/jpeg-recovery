@@ -50,11 +50,12 @@ def sh(*cmd):
 
 
 class Disk:
-    def __init__(self, tmp, fs, layout, size="120m"):
+    def __init__(self, tmp, fs, layout, size="120m", fsargs=None):
         self.img = tempfile.mktemp(suffix=".dmg", dir=tmp)
         self.mnt = tempfile.mkdtemp(dir=tmp)
+        extra = ["-fsargs", fsargs] if fsargs else []
         sh("hdiutil", "create", "-size", size, "-fs", fs, "-volname", "CARD", "-layout", layout,
-           self.img, "-quiet")
+           *extra, self.img, "-quiet")
         self.dev = None
 
     def mount(self):
@@ -180,14 +181,15 @@ class RealDiskTests(unittest.TestCase):
     def test_quick_formatted_card(self):
         """Camera-style quick format: fresh empty file-system tables, photo data left in place.
         (macOS Disk Utility "Erase" may TRIM/wipe the data, which no tool can undo.)"""
-        for fs in ("ExFAT", "MS-DOS FAT32"):
+        # Real 32 GB cards use 32 KB clusters; FAT32 needs 65525+ clusters, hence 2.1 GB.
+        for fs, size, args in (("ExFAT", "120m", None), ("MS-DOS FAT32", "2100m", "-c 64")):
             with self.subTest(fs=fs):
-                self.disk = d = Disk(self.tmp, fs, "MBRSPUD")
+                self.disk = d = Disk(self.tmp, fs, "MBRSPUD", size, args)
                 m = d.mount()
                 for i in range(6):
                     self.write(os.path.join(m, "DCIM/100MEDIA/DJI_%04d.JPG" % i), self.photos[i], 1688000000)
                 d.unmount()
-                blank = Disk(self.tmp, fs, "MBRSPUD")
+                blank = Disk(self.tmp, fs, "MBRSPUD", size, args)
                 src_b = carver.Source(blank.img, os.path.getsize(blank.img))
                 import fsmeta
                 (off, kind), = fsmeta.find_volumes(src_b)
@@ -201,12 +203,57 @@ class RealDiskTests(unittest.TestCase):
                     f.write(fresh)
                 raw = d.attach_raw()
                 sc, src = scan_device(raw)
-                got = {sha(carver.read_item(src, f)) for f in sc.found}
+                got = {sha(carver.read_item(src, f)): f for f in sc.found}
                 lost = [i for i in range(6) if sha(self.photos[i]) not in got]
                 self.assertEqual(lost, [], "%s: photos lost after quick format" % fs)
+                # Original names come back from the "lost folder" left by the format,
+                # and the photos are listed as soon as that folder is found.
+                for i in range(6):
+                    f = got[sha(self.photos[i])]
+                    self.assertEqual((f["name"] or "").upper(), "DJI_%04d.JPG" % i, fs)
+                    self.assertTrue(f["folder"].startswith("/Lost folder"), f["folder"])
+                    self.assertEqual(f["status"], "deleted")
+                self.assertEqual(sc.stats["lost folder photos listed early"], 6, sc.stats)
                 src.close()
                 sh("hdiutil", "detach", d.dev, "-force")
                 d.dev = None
+
+    def test_phone_card_after_format(self):
+        """Like a real phone card: thumbnail cache + big video first, photos later, then
+        quick-formatted. Thumbnails and named photos must both be found."""
+        self.disk = d = Disk(self.tmp, "MS-DOS FAT32", "MBRSPUD", "2100m", "-c 64")
+        m = d.mount()
+        thumbs = [make_photo(300 + i, 160, 120) for i in range(5)]
+        cache = b"\x01\x02thumbcache" + b"".join(os.urandom(37) + t for t in thumbs)  # not sector aligned
+        self.write(os.path.join(m, "DCIM/.thumbnails/.thumbdata3-1967290299"), cache, 1688000000)
+        self.write(os.path.join(m, "DCIM/Camera/VID_0001.mp4"), os.urandom(200 << 20), 1688000000)
+        for i in range(6):
+            self.write(os.path.join(m, "DCIM/Camera/IMG_%04d.jpg" % i), self.photos[i], 1688000000 + i)
+        d.unmount()
+        blank = Disk(self.tmp, "MS-DOS FAT32", "MBRSPUD", "2100m", "-c 64")
+        src_b = carver.Source(blank.img, os.path.getsize(blank.img))
+        import fsmeta
+        (off, kind), = fsmeta.find_volumes(src_b)
+        v = fsmeta.FatVolume(src_b, off)
+        meta_end = v.coff(v.root_cluster) + v.cs
+        src_b.close()
+        with open(blank.img, "rb") as f:
+            fresh = f.read(meta_end)
+        with open(d.img, "r+b") as f:
+            f.write(fresh)
+        raw = d.attach_raw()
+        sc, src = scan_device(raw)
+        got = {sha(carver.read_item(src, f)): f for f in sc.found}
+        for i in range(6):
+            f = got.get(sha(self.photos[i]))
+            self.assertIsNotNone(f, "photo %d not recovered" % i)
+            self.assertEqual(f["name"], "IMG_%04d.jpg" % i)
+        for t in thumbs:
+            self.assertIn(sha(t), got, "thumbnail in cache not recovered")
+            self.assertEqual(got[sha(t)]["status"], "embedded")
+        self.assertEqual(sc.stats["lost folder photos listed early"], 6, sc.stats)
+        self.assertEqual(len(sc.found), 11)
+        src.close()
 
     def test_fragmented_existing_file(self):
         for fs in ("MS-DOS FAT32", "ExFAT"):

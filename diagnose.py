@@ -229,7 +229,7 @@ def run():
         print("  UNREADABLE (bad) areas: %d KB" % (src.bad_bytes // 1024))
     print("  1 MB blocks: %d all-zero, %d all-FF (erased), %d random-looking, %d other" % (
         zero, ff, random_like, blocks - zero - ff - random_like))
-    print("  JPEG starts: %d at sector boundaries, %d elsewhere (inside other files)" % (sig_aligned, sig_unaligned))
+    print("  JPEG starts: %d at sector boundaries, %d inside other files (thumbnail caches, previews)" % (sig_aligned, sig_unaligned))
     print("  Valid JPEGs found in sample: %d" % len(good))
     for p, r in good[:3]:
         print("    at %d: %dx%d, %d KB" % (p, r["width"], r["height"], r["length"] // 1024))
@@ -247,6 +247,9 @@ def run():
     sc.run()
     print("  finished in %.0fs, found %d photos, error: %s" % (time.time() - t0, len(sc.found), sc.error))
     print("  stats: %s" % {k: v for k, v in sc.stats.items() if k != "logged_rejects"})
+    by = collections.Counter(f["status"] for f in sc.found)
+    print("  by type: %d existing, %d deleted (named), %d deep scan, %d inside other files" % (
+        by["existing"], by["deleted"], by["unknown"], by["embedded"]))
     for f in sc.found[:5]:
         print("    %s (%s) %dx%d %d KB at %d" % (f["name"] or "(no name)", f["status"], f["width"],
               f["height"], f["length"] // 1024, f["extents"][0][0]))

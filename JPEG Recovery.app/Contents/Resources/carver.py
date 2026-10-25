@@ -29,8 +29,10 @@ MIN_JPEG = 1024            # ignore fragments smaller than 1 KiB
 MIN_DIM = 16               # ignore images smaller than 16x16
 ALIGN = 512                # files on FAT/exFAT/NTFS/HFS/APFS always start on a sector boundary
 ENTROPY_WIN = 4 << 20
-ZERO_RUN = b"\x00" * (1 << 20)  # 1 MiB of zeros never occurs inside real scan data
+ZERO_BLOCK = b"\x00" * 65536  # 16 zero blocks in a row (1 MiB) never occur inside real image data
+ZERO_BLOCKS_LIMIT = 16
 FS_SIZE_SLACK = 64 << 20   # trust a directory entry's size if it's at most this much bigger
+MIN_EMBED_DIM = 96         # JPEGs inside other files (thumbnail caches, previews) must be at least this big
 
 SIG = b"\xff\xd8\xff"
 FIRST_OK = set(range(0xE0, 0xF0)) | {0xDB, 0xC4, 0xC0, 0xC1, 0xC2, 0xFE, 0xDD}
@@ -352,17 +354,32 @@ def parse_jpeg(src, p, why=None, header_only=False):
         pos += 2 + seg_len
 
 
+def _zero_run(data, end):
+    """True if data[:end] contains about 1 MiB of zero bytes in a row (an erased
+    area, so the photo can't continue). Compares 64 KiB blocks: fast in all cases."""
+    mv = memoryview(data)
+    run = 0
+    for i in range(0, end - 65535, 65536):
+        if mv[i:i + 65536] == ZERO_BLOCK:
+            run += 1
+            if run >= ZERO_BLOCKS_LIMIT:
+                return True
+        else:
+            run = 0
+    return False
+
+
 def _skip_entropy(src, pos, limit):
     while pos < limit:
         data = src.get(pos, ENTROPY_WIN)
         if len(data) < 2:
             return None
         mt = ENTROPY_MARKER.search(data)
-        z = data.find(ZERO_RUN)
-        if mt and (z == -1 or mt.start() < z):
-            return pos + mt.start()
-        if z != -1:
+        end = mt.start() if mt else len(data)
+        if _zero_run(data, end):
             return None
+        if mt:
+            return pos + end
         pos += len(data) - 1
     return None
 
@@ -390,6 +407,9 @@ class Scanner:
         self._fs_by_start = {}
         self._fs_used = set()
         self._known = {}  # start offset -> bytes to skip, for photos already listed
+        self._lost = {}   # start offset -> FileRec, photos listed from a lost folder (verified later)
+        self._starts = set()
+        self._vols = []
 
     def cancel(self):
         self.cancelled = True
@@ -418,7 +438,7 @@ class Scanner:
     # -- pass 1
     def _fs_pass(self):
         try:
-            recs, self.volumes = fsmeta.scan(self.src, self.src.sector)
+            recs, self.volumes, self._vols = fsmeta.scan_volumes(self.src, self.src.sector)
         except DeviceGone:
             raise
         except Exception:
@@ -439,7 +459,7 @@ class Scanner:
     def _match(self, p):
         return self._fs_by_start.get(p)
 
-    def _add(self, info, rec, extents):
+    def _add(self, info, rec, extents, status=None):
         item = dict(info)
         item["extents"] = [tuple(e) for e in extents]
         item["length"] = sum(ln for _, ln in item["extents"])
@@ -448,10 +468,66 @@ class Scanner:
                         status="deleted" if rec.deleted else "existing")
             self._fs_used.add(id(rec))
         else:
-            item.update(name=None, folder=None, mtime=None, status="unknown")
+            item.update(name=None, folder=None, mtime=None, status=status or "unknown")
         with self._lock:
             item["id"] = len(self.found)
             self.found.append(item)
+            self._starts.add(item["extents"][0][0])
+
+    def _quick_header(self, extents, size):
+        """Check that a file the file system knows about starts with a real JPEG
+        header (reads only the first 128 KB, so it's fast anywhere on the card)."""
+        tmp = {"extents": extents, "length": size}
+        for n in (128 << 10, 2 << 20):
+            head = read_item(self.src, tmp, 0, min(n, size))
+            info = parse_jpeg(BufSource(head), 0, header_only=True)
+            if info is not None or n >= size:
+                return info
+        return None
+
+    # -- lost folders (left behind after a quick format or folder delete)
+    def _find_lost_dirs(self, cstart, data, limit):
+        if not self._vols:
+            return
+        end = cstart + limit
+        new = []
+        for v in self._vols:
+            if v.end <= cstart or v.heap >= end:
+                continue
+            if isinstance(v, fsmeta.FatVolume):
+                k = data.find(b".          ", 0, limit)
+                while k != -1:
+                    off = cstart + k
+                    if (off - v.heap) % v.cs == 0 and v.heap <= off < v.end:
+                        v.lost_dir_at(off, new)
+                    k = data.find(b".          ", k + 1, limit)
+            else:
+                first = max(v.heap, cstart)
+                first += -(first - v.heap) % v.cs
+                for off in range(first, min(end, v.end), v.cs):
+                    if data[off - cstart] in (0x85, 0x05):
+                        v.lost_dir_at(off, new)
+        if not new:
+            return
+        jpgs = [r for r in new if not r.name.startswith("._")]
+        self.stats["lost folder entries"] += len(jpgs)
+        listed = 0
+        for r in jpgs:
+            self._fs_by_start.setdefault(r.start, r)
+            if r.start in self._known or r.start in self._starts or r.start < cstart:
+                continue
+            if not (MIN_JPEG <= r.size <= MAX_JPEG) or r.start + r.size > self.src.size:
+                continue
+            info = self._quick_header(r.extents, r.size)
+            if info is None:
+                continue  # overwritten: the deep scan still looks there
+            info["start"] = r.start
+            self._add(info, r, r.extents)
+            self._known[r.start] = r.extents[0][1]
+            self._lost[r.start] = r
+            listed += 1
+        self.stats["lost folder photos listed early"] += listed
+        self.log("lost folder(s) near %d: %d JPEG entries, %d listed right away" % (cstart, len(jpgs), listed))
 
     # -- pass 1b
     def _existing_pass(self):
@@ -495,15 +571,33 @@ class Scanner:
             local = i - cstart
             limit = min(chunk, len(data))
             next_i = cstart + chunk
+            try:
+                self._find_lost_dirs(cstart, data, limit)
+            except DeviceGone:
+                raise
+            except Exception as e:  # never let a damaged folder stop the scan
+                self.log("lost-folder check failed near %d: %s" % (cstart, e))
             while not self.cancelled:
                 k = data.find(SIG, local)
                 if k == -1 or k >= limit:
                     break
                 p = cstart + k
                 if p % ALIGN:
-                    local = k + 1
+                    # Not on a sector boundary: a JPEG inside another file, e.g. a phone's
+                    # thumbnail cache or a preview inside a video/RAW file.
+                    info = parse_jpeg(src, p)
+                    if info and info["width"] >= MIN_EMBED_DIM and info["height"] >= MIN_EMBED_DIM:
+                        self.stats["inside other files"] += 1
+                        self._add(info, None, [(p, info["length"])], status="embedded")
+                        end = p + info["length"]
+                        if end >= cstart + chunk:
+                            next_i = end
+                            break
+                        local = end - cstart
+                    else:
+                        local = k + 1
                     continue
-                if p in self._known:  # already listed from the file system
+                if p in self._known and p not in self._lost:  # listed from the file system
                     end = p + self._known[p]
                     end += -end % ALIGN
                     if end >= cstart + chunk:
@@ -514,6 +608,25 @@ class Scanner:
                 why = []
                 info = parse_jpeg(src, p, why)
                 self.stats["checked"] += 1
+                if p in self._lost:
+                    rec = self._lost.pop(p)
+                    if info and info["length"] <= rec.size <= info["length"] + FS_SIZE_SLACK:
+                        end = p + rec.size  # listed early from a lost folder and confirmed
+                        end += -end % ALIGN
+                        if end >= cstart + chunk:
+                            next_i = end
+                            break
+                        local = end - cstart
+                        continue
+                    if info:  # a different photo now sits there: list it too
+                        self._add(info, None, [(p, info["length"])])
+                        end = p + info["length"]
+                        end += -end % ALIGN
+                        if end >= cstart + chunk:
+                            next_i = end
+                            break
+                        local = end - cstart
+                        continue
                 if info is None:
                     self.stats["rejected: " + (why[0] if why else "?")] += 1
                     if self.stats["logged_rejects"] < 20:

@@ -226,13 +226,34 @@ class FatVolume(_Vol):
         return (v >> 4) if c & 1 else (v & 0xFFF)
 
     def walk(self, out):
+        self.seen = set()
         if self.bits == 32:
+            self.seen.add(self.root_cluster)
             root = self._dir_bytes(self.root_cluster, deleted=False)
         else:
             root = self.src.get(self.root_off, self.root_len)
         if root is None:
             return
-        self._parse_dir(root, "", False, out, 0, set())
+        self._parse_dir(root, "", False, out, 0, self.seen)
+
+    def lost_dir_at(self, off, out):
+        """If a directory no longer linked from the file system (e.g. after a
+        quick format) starts at byte offset `off`, read its entries into `out`.
+        Returns True if one was found."""
+        if not (self.heap <= off < self.end) or (off - self.heap) % self.cs:
+            return False
+        c = (off - self.heap) // self.cs + 2
+        if c in self.seen:
+            return False
+        head = self.src.get(off, 64)
+        if not (head[:11] == b".          " and head[11] & 0x10 and
+                head[32:43] == b"..         " and head[43] & 0x10):
+            return False
+        data = self._dir_bytes(c, deleted=True)
+        n = max(1, len(data) // self.cs)
+        self.seen.update(range(c, c + n))
+        self._parse_dir(data, "/Lost folder", True, out, 0, self.seen)
+        return True
 
     def _dir_bytes(self, first, deleted):
         if not self.valid_cluster(first):
@@ -398,11 +419,43 @@ class ExFatVolume(_Vol):
         return [(self.coff(first), length)], True, True
 
     def walk(self, out):
+        self.seen = set()
         ch = self.chain(self.root, 1 << 16)
         if not ch:
             return
+        self.seen.update(ch)
         data = b"".join(self.src.get(self.coff(c), self.cs) for c in ch)
-        self._parse_dir(data, "", False, out, 0, set())
+        self._parse_dir(data, "", False, out, 0, self.seen)
+
+    def lost_dir_at(self, off, out):
+        """Like FatVolume.lost_dir_at, for exFAT (detected by a valid file entry set)."""
+        if not (self.heap <= off < self.end) or (off - self.heap) % self.cs:
+            return False
+        c = (off - self.heap) // self.cs + 2
+        if c in self.seen:
+            return False
+        head = self.src.get(off, 32 * 19)
+        if len(head) < 96 or head[0] not in (0x85, 0x05):
+            return False
+        sec = head[1]
+        if sec < 2 or sec > 18 or len(head) < 32 * (sec + 1):
+            return False
+        entries = [head[32 * k:32 * (k + 1)] for k in range(sec + 1)]
+        deleted = head[0] == 0x05
+        want = 0x00 if deleted else 0x80
+        if entries[1][0] != (0x40 | want) or not _exfat_checksum_ok(entries, deleted):
+            return False
+        parts = []
+        for k in range(MAX_DELETED_DIR_CLUSTERS):
+            if not self.valid_cluster(c + k):
+                break
+            d = self.src.get(self.coff(c + k), self.cs)
+            parts.append(d)
+            self.seen.add(c + k)
+            if any(d[i] == 0 for i in range(0, len(d), 32)):
+                break  # end-of-directory marker
+        self._parse_dir(b"".join(parts), "/Lost folder", True, out, 0, self.seen)
+        return True
 
     def _parse_dir(self, data, folder, parent_deleted, out, depth, seen):
         if depth > MAX_DEPTH or len(out) > MAX_ENTRIES:
@@ -493,11 +546,17 @@ def _exfat_time(ts, ms10, utc):
 # ------------------------------------------------------------------ entry point
 def scan(src, sector=512):
     """Return (list_of_FileRec, list_of_volume_descriptions). Never raises on bad data."""
-    recs, vols = [], []
+    recs, vols, _ = scan_volumes(src, sector)
+    return recs, vols
+
+
+def scan_volumes(src, sector=512):
+    """Like scan(), plus the volume objects (used to find lost folders later)."""
+    recs, vols, objs = [], [], []
     try:
         found = find_volumes(src, sector)
     except Exception:
-        return recs, vols
+        return recs, vols, objs
     for off, kind in found:
         try:
             v = ExFatVolume(src, off) if kind == "exfat" else FatVolume(src, off)
@@ -505,6 +564,7 @@ def scan(src, sector=512):
                 continue
             vols.append("%s at %d" % ("exFAT" if kind == "exfat" else "FAT%d" % v.bits, off))
             v.walk(recs)
+            objs.append(v)
         except Exception:
             continue  # damaged volume: fall back to deep scan only
-    return recs, vols
+    return recs, vols, objs

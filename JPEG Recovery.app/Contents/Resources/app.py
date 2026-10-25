@@ -324,9 +324,10 @@ def _file_name(it):
         if not name.lower().endswith(carver.fsmeta.JPEG_EXT):
             name += ".jpg"
         return name
+    kind = "Preview" if it["status"] == "embedded" else "Photo"
     if it["exif_date"]:
-        return "Photo %s.jpg" % it["exif_date"].replace(":", "-", 2).replace(":", ".")
-    return "recovered_%05d.jpg" % (it["id"] + 1)
+        return "%s %s.jpg" % (kind, it["exif_date"].replace(":", "-", 2).replace(":", "."))
+    return "%s_%05d.jpg" % ("preview" if kind == "Preview" else "recovered", it["id"] + 1)
 
 
 def _makedirs_as_user(path, uid, gid):
