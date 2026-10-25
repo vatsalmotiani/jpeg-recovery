@@ -124,6 +124,7 @@ def run():
 
     # ---- read test
     print("\n[0] Read test")
+    speed = 0
     t0 = time.time()
     test = carver.Source(path, size, sector)
     got = 0
@@ -131,7 +132,8 @@ def run():
         for off in range(0, min(size, 64 * MiB), MiB):
             got += len(test._pread(MiB, off))
         dt = max(time.time() - t0, 0.001)
-        print("  64 MB sequential read: %.1f MB/s, unreadable %d KB" % (got / dt / 1e6, test.bad_bytes // 1024))
+        speed = got / dt
+        print("  64 MB sequential read: %.1f MB/s, unreadable %d KB" % (speed / 1e6, test.bad_bytes // 1024))
         sample = test._pread(4096, 0)
         print("  first 4 KB: %d zero bytes, starts %s" % (sample.count(0), sample[:16].hex(" ")))
     except OSError as e:
@@ -263,8 +265,18 @@ def run():
     # ---- verdict
     print("\n[3] Verdict")
     nz = blocks - zero - ff
-    if good or sc.found or any(not r.deleted for r in jpg):
-        print("  JPEG photos ARE present. If the app shows none, that's a bug: please send this output.")
+    if not jpg and vols:
+        print("  The card's file list has no JPEG entries (formatted or emptied card), so original")
+        print("  names can't be recovered; the deep scan finds photos by their content instead.")
+    if sc.found or any(not r.deleted for r in jpg):
+        print("  JPEG photos ARE present and the scanner finds them. If the app shows none, that's a")
+        print("  bug: please send this report.")
+    elif good:
+        first_gb = min(p for p, _ in good) / 1e9
+        print("  JPEG photos ARE present, starting around %.1f GB into the card, so the app finds" % first_gb)
+        print("  them once its scan gets that far (about %d min at this card's read speed). The"
+              % max(1, round(first_gb * 1e9 / max(speed, 1) / 60)))
+        print("  full card takes about %d min. Let the scan finish." % max(1, round(size / max(speed, 1) / 60)))
     elif blocks and zero + ff >= blocks * 0.95:
         print("  The sampled card areas are empty (all zeros/FF). The card was probably erased/TRIMmed")
         print("  or never held data in these areas. Data that was wiped can't be recovered.")
