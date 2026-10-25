@@ -1,0 +1,84 @@
+#!/bin/bash
+# Double-click launcher for JPEG Recovery.app.
+# Asks for the admin password (needed to read the raw card), starts the local
+# server as root in the background, and opens the UI in the default browser.
+
+RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+STATE_DIR="${TMPDIR:-/tmp}/jpeg-recovery-$(id -u)"
+URL_FILE="$STATE_DIR/url"
+LOG="$STATE_DIR/server.log"
+mkdir -p "$STATE_DIR" && chmod 700 "$STATE_DIR"
+
+alert() {  # alert "message"
+  /usr/bin/osascript - "$1" >/dev/null 2>&1 <<'OSA'
+on run argv
+  display dialog (item 1 of argv) with title "JPEG Recovery" buttons {"OK"} default button "OK" with icon caution
+end run
+OSA
+}
+
+# Already running? Just reopen the page.
+if [ -f "$URL_FILE" ]; then
+  URL="$(cat "$URL_FILE")"
+  PORT="$(echo "$URL" | sed -E 's|http://127.0.0.1:([0-9]+)/.*|\1|')"
+  if /usr/bin/curl -fs -m 2 "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1; then
+    /usr/bin/open "$URL"
+    exit 0
+  fi
+fi
+
+# Find Python 3.8+ (python.org / Homebrew / Apple Command Line Tools).
+PY=""
+for c in /Library/Frameworks/Python.framework/Versions/Current/bin/python3 \
+         /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  if [ -x "$c" ] && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>/dev/null; then
+    PY="$c"; break
+  fi
+done
+if [ -z "$PY" ] && /usr/bin/xcode-select -p >/dev/null 2>&1 && /usr/bin/python3 -c 'import sys' 2>/dev/null; then
+  PY=/usr/bin/python3
+fi
+if [ -z "$PY" ]; then
+  /usr/bin/xcode-select --install >/dev/null 2>&1
+  alert "JPEG Recovery needs Apple's free Command Line Tools (they include Python).
+
+An installer window should now be open: click Install and wait for it to finish (a few minutes), then open JPEG Recovery again.
+
+If no window appeared, open Terminal and run:  xcode-select --install"
+  exit 1
+fi
+
+PORT="$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+TOKEN="$("$PY" -c 'import secrets; print(secrets.token_urlsafe(24))')"
+URL="http://127.0.0.1:$PORT/?t=$TOKEN"
+: > "$LOG"
+
+# Start the server with admin rights (native macOS password prompt).
+/usr/bin/osascript - "$PY" "$RES/app.py" "$LOG" "$PORT" "$TOKEN" "$(id -u)" "$(id -g)" <<'OSA'
+on run argv
+  set py to item 1 of argv
+  set appPy to item 2 of argv
+  set logFile to item 3 of argv
+  set cmd to "JPEG_RECOVERY_PORT=" & item 4 of argv & " JPEG_RECOVERY_TOKEN=" & item 5 of argv & ¬
+    " JPEG_RECOVERY_UID=" & item 6 of argv & " JPEG_RECOVERY_GID=" & item 7 of argv & ¬
+    " JPEG_RECOVERY_NO_BROWSER=1 nohup " & quoted form of py & " -I " & quoted form of appPy & ¬
+    " >> " & quoted form of logFile & " 2>&1 &"
+  do shell script cmd with prompt "JPEG Recovery needs your password to read the SD card or pendrive. Nothing is written to it." with administrator privileges
+end run
+OSA
+if [ $? -ne 0 ]; then
+  exit 0  # user cancelled the password prompt
+fi
+
+for _ in $(seq 1 100); do
+  if /usr/bin/curl -fs -m 1 "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1; then
+    echo "$URL" > "$URL_FILE"
+    /usr/bin/open "$URL"
+    exit 0
+  fi
+  sleep 0.2
+done
+alert "JPEG Recovery could not start.
+
+$(tail -n 8 "$LOG" 2>/dev/null)"
+exit 1

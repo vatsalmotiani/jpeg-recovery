@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JPEG Recovery</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --panel: #ffffff; --text: #1d1d1f; --muted: #6e6e73;
+    --line: #d2d2d7; --accent: #0a66d6; --accent-text: #ffffff; --danger: #c62828;
+    --ok: #1b7f3b; --tile: #e8e8ed; --sel: #0a66d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161618; --panel: #222225; --text: #f5f5f7; --muted: #a1a1a6;
+      --line: #3a3a3e; --accent: #3d8bfd; --accent-text: #ffffff; --danger: #ff6b6b;
+      --ok: #4cd07d; --tile: #2c2c30; --sel: #3d8bfd;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
+           display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header small { color: var(--muted); }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 120px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+           padding: 18px; margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 15px; }
+  .muted { color: var(--muted); }
+  .err { color: var(--danger); white-space: pre-wrap; }
+  .okc { color: var(--ok); }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+           padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=text] { font: inherit; width: 100%; padding: 7px 10px; border-radius: 8px;
+                     border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .devices { display: grid; gap: 8px; margin-bottom: 12px; }
+  .dev { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line);
+         border-radius: 10px; cursor: pointer; }
+  .dev.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .dev b { display: block; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; min-width: 200px; }
+  details { margin: 10px 0; } summary { cursor: pointer; color: var(--muted); }
+  .bar { height: 8px; background: var(--tile); border-radius: 99px; overflow: hidden; margin: 10px 0; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .toolbar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 10px 0;
+             display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+  .tile { position: relative; background: var(--panel); border: 2px solid transparent; border-radius: 10px;
+          overflow: hidden; content-visibility: auto; contain-intrinsic-size: 160px 200px; }
+  .tile.sel { border-color: var(--sel); }
+  .thumb { aspect-ratio: 1; background: var(--tile); overflow: hidden; cursor: zoom-in;
+           display: flex; align-items: center; justify-content: center; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .meta { padding: 6px 8px; font-size: 12px; color: var(--muted); display: flex;
+          justify-content: space-between; gap: 6px; }
+  .tile input { position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; cursor: pointer; }
+  .o2 { transform: scaleX(-1); } .o3 { transform: rotate(180deg); } .o4 { transform: scaleY(-1); }
+  .o5 { transform: rotate(90deg) scaleX(-1); } .o6 { transform: rotate(90deg); }
+  .o7 { transform: rotate(270deg) scaleX(-1); } .o8 { transform: rotate(270deg); }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; z-index: 20;
+           align-items: center; justify-content: center; padding: 16px; }
+  .modal.show { display: flex; }
+  .dialog { background: var(--panel); border-radius: 14px; padding: 20px; width: min(560px, 100%);
+            border: 1px solid var(--line); }
+  .dialog h2 { margin-top: 0; }
+  #lightbox { background: rgba(0,0,0,.9); flex-direction: column; gap: 10px; cursor: zoom-out; }
+  #lightbox img { max-width: 96vw; max-height: 88vh; object-fit: contain; }
+  #lightbox .cap { color: #ddd; font-size: 13px; }
+  .empty { text-align: center; padding: 40px; color: var(--muted); }
+  .name { padding: 6px 8px 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden;
+          text-overflow: ellipsis; }
+  .badge { position: absolute; top: 8px; right: 8px; font-size: 11px; font-weight: 600; padding: 2px 7px;
+           border-radius: 99px; background: rgba(0,0,0,.6); color: #fff; }
+  .badge.deleted { background: #c62828; } .badge.existing { background: #1b7f3b; }
+  select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); }
+  .warn { color: #b26a00; } @media (prefers-color-scheme: dark) { .warn { color: #ffb74d; } }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>JPEG Recovery</h1><small>Find and restore .jpg photos from a pendrive or SD card</small></div>
+  <button id="quit" title="Stop the app">Quit</button>
+</header>
+<main>
+  <section class="panel" id="pick">
+    <h2>1. Choose the pendrive or SD card</h2>
+    <div id="rootwarn" class="err" style="display:none;margin-bottom:10px">
+      The app is not running with admin rights, so it can't read the raw card. Click Quit, then open JPEG Recovery again and enter your Mac password.
+    </div>
+    <div class="devices" id="devices"><div class="muted">Looking for drives…</div></div>
+    <div class="row">
+      <button id="refresh">Refresh list</button>
+      <span class="muted">Plug in the card and click Refresh if it is not listed.</span>
+    </div>
+    <details>
+      <summary>Advanced: scan a disk image or device path</summary>
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="custom" class="grow" placeholder="/dev/rdisk4 or /path/to/card.img">
+      </div>
+    </details>
+    <label class="row" style="margin-top:10px;cursor:pointer">
+      <input type="checkbox" id="unmount" checked>
+      <span>Unmount the card before scanning <span class="muted">(recommended: stops macOS from writing to it and overwriting deleted photos)</span></span>
+    </label>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="scan" disabled>Scan for photos</button>
+      <span class="muted">Read-only. Nothing is written to the card.</span>
+    </div>
+    <div id="scanerr" class="err" style="margin-top:8px"></div>
+  </section>
+
+  <section class="panel" id="progress" style="display:none">
+    <h2 id="ptitle">2. Scanning…</h2>
+    <div class="bar"><div id="pbar"></div></div>
+    <div class="row" style="justify-content:space-between">
+      <span id="ptext" class="muted"></span>
+      <button id="cancel">Stop scan</button>
+    </div>
+    <div id="pnote" class="muted" style="margin-top:6px"></div>
+    <div id="pwarn" class="warn" style="margin-top:6px"></div>
+    <div id="perr" class="err"></div>
+  </section>
+
+  <section id="results" style="display:none">
+    <div class="toolbar">
+      <strong id="count">0 photos found</strong>
+      <span class="muted" id="selcount"></span>
+      <span class="grow"></span>
+      <select id="filter" title="Which photos to show">
+        <option value="all">Show all</option>
+        <option value="deleted">Deleted only</option>
+        <option value="existing">Existing files only</option>
+        <option value="unknown">Found by deep scan only</option>
+      </select>
+      <button id="selall">Select all</button>
+      <button id="selnone">Select none</button>
+      <button class="primary" id="recover" disabled>Recover selected</button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" style="display:none">No JPEG photos were found on this drive.</div>
+  </section>
+</main>
+
+<div class="modal" id="saveModal">
+  <div class="dialog">
+    <h2>Save recovered photos</h2>
+    <p class="muted" id="saveinfo"></p>
+    <label class="muted">Destination folder on your Mac (created if missing):</label>
+    <div class="row" style="margin:6px 0 14px">
+      <input type="text" id="dest" class="grow">
+      <button id="browse">Choose…</button>
+    </div>
+    <div id="saveprog" style="display:none">
+      <div class="bar"><div id="sbar"></div></div>
+      <div id="stext" class="muted"></div>
+    </div>
+    <div id="saveerr" class="err" style="margin-bottom:10px"></div>
+    <div class="row" style="justify-content:flex-end">
+      <button id="reveal" style="display:none">Show in Finder</button>
+      <button id="closeSave">Cancel</button>
+      <button class="primary" id="doSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="lightbox"><img id="lbimg" alt=""><div class="cap" id="lbcap"></div></div>
+
+<script>
+const T = "__TOKEN__";
+const $ = id => document.getElementById(id);
+let chosen = null, since = 0, gen = 0, total = 0, polling = null, savePoll = null;
+const selected = new Set();
+const items = [];
+
+async function api(path, body) {
+  const opts = body === undefined ? { headers: { "X-Token": T } }
+    : { method: "POST", headers: { "X-Token": T, "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  let j = {};
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(j.error || ("Request failed (" + r.status + ")"));
+  return j;
+}
+function fmtSize(b) {
+  if (!b) return "0 B";
+  const u = ["B","KB","MB","GB","TB"]; let i = 0;
+  while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; }
+  return (i ? b.toFixed(b < 10 ? 1 : 0) : b) + " " + u[i];
+}
+function fmtTime(s) {
+  s = Math.round(s); if (s < 60) return s + "s";
+  const m = Math.floor(s / 60); if (m < 60) return m + "m " + (s % 60) + "s";
+  return Math.floor(m / 60) + "h " + (m % 60) + "m";
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+async function loadDevices() {
+  $("devices").innerHTML = '<div class="muted">Looking for drives…</div>';
+  try {
+    const j = await api("/api/devices");
+    $("rootwarn").style.display = j.root ? "none" : "block";
+    const box = $("devices"); box.innerHTML = "";
+    if (!j.devices.length) {
+      box.innerHTML = '<div class="muted">No external drives found. Insert the pendrive / SD card and click Refresh.</div>';
+    }
+    j.devices.forEach(d => {
+      const el = document.createElement("label");
+      el.className = "dev";
+      el.innerHTML = '<input type="radio" name="dev"><div><b>' + esc(d.name) + ' — ' + fmtSize(d.size) +
+        '</b><span class="muted">' + esc(d.id) + (d.protocol ? " · " + esc(d.protocol) : "") +
+        (d.formats && d.formats.length ? " · " + esc(d.formats.join(", ")) : "") +
+        (d.volumes.length ? " · " + esc(d.volumes.join(", ")) : "") + '</span></div>';
+      el.querySelector("input").onchange = () => {
+        chosen = d.path; $("custom").value = "";
+        document.querySelectorAll(".dev").forEach(x => x.classList.remove("on"));
+        el.classList.add("on"); updateScanBtn();
+      };
+      box.appendChild(el);
+    });
+  } catch (e) { $("devices").innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
+  chosen = null; updateScanBtn();
+}
+function target() { return $("custom").value.trim() || chosen; }
+function updateScanBtn() { $("scan").disabled = !target() || !!polling; }
+$("custom").oninput = () => {
+  if ($("custom").value.trim()) {
+    chosen = null;
+    document.querySelectorAll(".dev input").forEach(x => { x.checked = false; x.closest(".dev").classList.remove("on"); });
+  }
+  updateScanBtn();
+};
+$("refresh").onclick = loadDevices;
+
+$("scan").onclick = async () => {
+  $("scanerr").textContent = "";
+  try { await api("/api/scan", { path: target(), unmount: $("unmount").checked }); }
+  catch (e) { $("scanerr").textContent = e.message; return; }
+  since = 0; items.length = 0; selected.clear();
+  $("grid").innerHTML = ""; $("empty").style.display = "none";
+  $("progress").style.display = "block"; $("results").style.display = "block";
+  $("perr").textContent = ""; $("pwarn").textContent = ""; $("cancel").style.display = "";
+  $("ptitle").textContent = "2. Scanning…";
+  updateCounts();
+  polling = setInterval(poll, 600); updateScanBtn(); poll();
+};
+$("cancel").onclick = () => api("/api/cancel", {}).catch(() => {});
+
+let busy = false;
+async function poll() {
+  if (busy) return; busy = true;
+  try {
+    const s = await api("/api/status?since=" + since);
+    if (s.state === "idle") return;
+    gen = s.gen; total = s.total;
+    const fsInfo = s.volumes && s.volumes.length ? "File system found: " + s.volumes.map(v => v.split(" ")[0]).join(", ") + " (original names and dates recovered where possible)." : "";
+    $("pnote").textContent = [s.note, fsInfo].filter(Boolean).join(" ");
+    $("pwarn").textContent = s.bad_bytes ? "Warning: " + fmtSize(s.bad_bytes) + " of the card could not be read (damaged area). Those parts were skipped; the card may be failing, so recover your photos soon." : "";
+    if (s.state === "scanning") $("ptitle").textContent = "2. Scanning… (" + s.phase + ")";
+    s.items.forEach(addTile); since += s.items.length;
+    const pct = s.total ? (100 * s.scanned / s.total) : 0;
+    $("pbar").style.width = pct.toFixed(1) + "%";
+    const eta = s.speed > 0 ? (s.total - s.scanned) / s.speed : 0;
+    $("ptext").textContent = fmtSize(s.scanned) + " of " + fmtSize(s.total) + " (" + pct.toFixed(1) + "%) · " +
+      fmtSize(s.speed) + "/s · " + s.count + " photos" + (s.state === "scanning" && eta ? " · ~" + fmtTime(eta) + " left" : "");
+    if (s.state === "done") {
+      clearInterval(polling); polling = null; updateScanBtn();
+      $("cancel").style.display = "none";
+      $("ptitle").textContent = s.error ? "Scan stopped with an error" : s.cancelled ? "Scan stopped — showing photos found so far" : "2. Scan complete";
+      if (s.error) $("perr").textContent = s.error + "\nPhotos found before the error are listed below.";
+      if (!s.count) $("empty").style.display = "block";
+    }
+  } catch (e) { $("perr").textContent = e.message; }
+  finally { busy = false; }
+}
+
+function addTile(it) {
+  items.push(it);
+  const el = document.createElement("div");
+  el.className = "tile";
+  const rot = it.has_thumb && it.orientation > 1 ? " o" + it.orientation : "";
+  const label = { deleted: "Deleted", existing: "Existing", unknown: "Deep scan" }[it.status] || "";
+  const title = it.name ? (it.folder && it.folder !== "/" ? it.folder + "/" : "") + it.name : "Name not recoverable" + (it.date ? " · taken " + it.date : "");
+  el.dataset.status = it.status;
+  el.innerHTML = '<input type="checkbox" title="Select"><span class="badge ' + esc(it.status) + '">' + label + '</span>' +
+    '<div class="thumb"><img loading="lazy" decoding="async" class="' + rot +
+    '" src="/thumb/' + it.id + '?g=' + gen + '&t=' + T + '" alt=""></div><div class="name" title="' + esc(title) + '">' +
+    esc(it.name || (it.date ? it.date.slice(0, 10).replace(/:/g, "-") : "Photo " + (it.id + 1))) + '</div><div class="meta"><span>' +
+    it.width + '×' + it.height + '</span><span>' + fmtSize(it.length) + '</span></div>';
+  if (!matchesFilter(el)) el.style.display = "none";
+  const cb = el.querySelector("input");
+  cb.onchange = () => { cb.checked ? selected.add(it.id) : selected.delete(it.id); el.classList.toggle("sel", cb.checked); updateCounts(); };
+  el.querySelector(".thumb").onclick = () => openLightbox(it);
+  $("grid").appendChild(el);
+  updateCounts();
+}
+function updateCounts() {
+  $("count").textContent = items.length + " photo" + (items.length === 1 ? "" : "s") + " found";
+  $("selcount").textContent = selected.size ? selected.size + " selected" : "";
+  $("recover").disabled = !selected.size;
+  $("recover").textContent = selected.size ? "Recover " + selected.size + " selected…" : "Recover selected";
+}
+function matchesFilter(el) { const f = $("filter").value; return f === "all" || el.dataset.status === f; }
+function setAll(on) {
+  document.querySelectorAll(".tile").forEach((el, i) => {
+    if (on && el.style.display === "none") return;  // "Select all" = all shown photos
+    const cb = el.querySelector("input"); cb.checked = on; el.classList.toggle("sel", on);
+    on ? selected.add(items[i].id) : selected.delete(items[i].id);
+  });
+  updateCounts();
+}
+$("filter").onchange = () => {
+  document.querySelectorAll(".tile").forEach(el => { el.style.display = matchesFilter(el) ? "" : "none"; });
+};
+$("selall").onclick = () => setAll(true);
+$("selnone").onclick = () => setAll(false);
+
+function openLightbox(it) {
+  $("lbimg").src = "/img/" + it.id + "?g=" + gen + "&t=" + T;
+  $("lbcap").textContent = (it.name || "Photo " + (it.id + 1)) + (it.date ? " · taken " + it.date : "") + " · " + it.width + "×" + it.height + " · " + fmtSize(it.length) + " · full resolution (click to close)";
+  $("lightbox").classList.add("show");
+}
+$("lightbox").onclick = () => { $("lightbox").classList.remove("show"); $("lbimg").src = ""; };
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("lightbox").onclick(); });
+
+$("recover").onclick = async () => {
+  $("saveerr").textContent = ""; $("saveprog").style.display = "none"; $("reveal").style.display = "none";
+  $("doSave").style.display = ""; $("doSave").disabled = false; $("closeSave").textContent = "Cancel";
+  $("saveinfo").textContent = selected.size + " photo(s) will be saved byte-for-byte at full original quality.";
+  if (!$("dest").value) { try { $("dest").value = (await api("/api/default-folder", {})).path; } catch (e) {} }
+  $("saveModal").classList.add("show");
+};
+$("browse").onclick = async () => {
+  $("browse").disabled = true;
+  try { const j = await api("/api/choose-folder", {}); if (j.path) $("dest").value = j.path; }
+  catch (e) { $("saveerr").textContent = e.message; }
+  finally { $("browse").disabled = false; }
+};
+$("closeSave").onclick = () => { if (!savePoll) $("saveModal").classList.remove("show"); };
+$("doSave").onclick = async () => {
+  $("saveerr").textContent = "";
+  const ids = items.filter(it => selected.has(it.id)).map(it => it.id);
+  try { await api("/api/recover", { ids, dest: $("dest").value }); }
+  catch (e) { $("saveerr").textContent = e.message; return; }
+  $("doSave").disabled = true; $("closeSave").disabled = true; $("saveprog").style.display = "block";
+  savePoll = setInterval(async () => {
+    try {
+      const r = (await api("/api/status?since=" + since)).recover;
+      if (!r) return;
+      $("sbar").style.width = (100 * (r.saved + r.failed) / r.total).toFixed(1) + "%";
+      $("stext").textContent = "Saved " + r.saved + " of " + r.total + (r.failed ? " · " + r.failed + " failed" : "");
+      if (r.done) {
+        clearInterval(savePoll); savePoll = null;
+        $("closeSave").disabled = false; $("closeSave").textContent = "Close"; $("doSave").style.display = "none";
+        if (r.error) $("saveerr").textContent = r.error;
+        if (r.saved) { $("stext").innerHTML = '<span class="okc">Saved ' + r.saved + ' photo(s) to ' + esc(r.dest) + '</span>' + (r.failed ? " · " + r.failed + " failed" : "") + (r.damaged ? ' · <span class="warn">' + r.damaged + " had unreadable parts (may show grey areas)</span>" : ""); $("reveal").style.display = ""; }
+      }
+    } catch (e) { $("saveerr").textContent = e.message; }
+  }, 400);
+};
+$("reveal").onclick = () => api("/api/reveal", {}).catch(() => {});
+$("quit").onclick = async () => {
+  if (!confirm("Quit JPEG Recovery?")) return;
+  try { await api("/api/quit", {}); } catch (e) {}
+  document.body.innerHTML = '<main><div class="panel">JPEG Recovery has stopped. You can close this tab.</div></main>';
+};
+
+loadDevices();
+setInterval(() => api("/api/ping", {}).catch(() => {}), 60000);
+// Resume view if the page is reloaded during/after a scan.
+api("/api/status?since=0").then(s => {
+  if (s.state === "idle") return;
+  $("progress").style.display = "block"; $("results").style.display = "block";
+  if (s.state === "scanning") { polling = setInterval(poll, 600); updateScanBtn(); }
+  poll();
+}).catch(() => {});
+</script>
+</body>
+</html>
