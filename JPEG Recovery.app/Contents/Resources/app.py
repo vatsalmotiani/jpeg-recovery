@@ -265,6 +265,7 @@ def _item_json(f):
         "orientation": f["orientation"], "has_thumb": f["thumb_rel"] is not None,
         "name": f["name"], "folder": f["folder"], "status": f["status"],
         "date": f["exif_date"], "pieces": len(f["extents"]),
+        "offset": f["extents"][0][0], "mtime": f["mtime"],
     }
 
 

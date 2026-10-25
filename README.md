@@ -54,12 +54,16 @@ raw data; nothing is written to the card. The app then opens in your web browser
 2. Open **JPEG Recovery** and enter your Mac password.
 3. **Pick the card** in the list and click **Scan for photos**. Keep *Unmount the card before
    scanning* ticked. It stops macOS from writing to the card and overwriting deleted photos.
-4. Photos appear as they are found, marked **Deleted**, **Existing** or **Deep scan** (found in
-   raw data; the name is unknown). Click a photo to see it at full resolution. Use the filter to
-   show only deleted photos.
-5. Tick the photos you want (or **Select all**), click **Recover selected**, choose a folder **on
-   your Mac** (not on the card), and click **Save**. You can do this while the scan is still running.
-6. Click **Show in Finder** to see them. Click **Quit** when you're done. The app also closes itself
+4. Photos appear as they're found, marked **Deleted**, **Existing** or **Deep scan** (found in raw
+   data; the name is unknown). The card map shows how far the scan has got and where photos were found.
+   If none show up for a while, that's normal: photos are often further into the card.
+5. **Click a photo** to view it full size. Use ← → to browse and **Select** to pick it. Once a photo is
+   selected, clicking others selects them too, and **Shift-click** selects a range. Use the filter
+   chips (e.g. *Deleted*), sorting (card order, date taken, size) and the thumbnail size slider to find
+   photos faster.
+6. Click **Recover** in the bar at the bottom, choose a folder **on your Mac** (not on the card), and
+   click **Save photos**. You can do this while the scan is still running.
+7. Click **Show in Finder** to see them. Click **Quit** when you're done. The app also closes itself
    after 15 minutes without use.
 
 ## How it works

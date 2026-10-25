@@ -6,179 +6,373 @@
 <title>JPEG Recovery</title>
 <style>
   :root {
-    --bg: #f5f5f7; --panel: #ffffff; --text: #1d1d1f; --muted: #6e6e73;
-    --line: #d2d2d7; --accent: #0a66d6; --accent-text: #ffffff; --danger: #c62828;
-    --ok: #1b7f3b; --tile: #e8e8ed; --sel: #0a66d6;
+    --bg: #f5f5f7; --panel: #ffffff; --panel-2: #fafafc; --text: #1d1d1f; --muted: #6e6e73;
+    --line: #e3e3e8; --line-strong: #d2d2d7; --accent: #0a66d6; --accent-soft: #e8f1fd;
+    --accent-text: #ffffff; --danger: #d12c2c; --danger-soft: #fdecec; --ok: #1b8a43;
+    --ok-soft: #e7f6ec; --warn: #a15c00; --warn-soft: #fff4e0; --tile: #ececf0;
+    --deleted: #d12c2c; --existing: #1b8a43; --deep: #6e6e73;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.06);
+    --tile-size: 168px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #161618; --panel: #222225; --text: #f5f5f7; --muted: #a1a1a6;
-      --line: #3a3a3e; --accent: #3d8bfd; --accent-text: #ffffff; --danger: #ff6b6b;
-      --ok: #4cd07d; --tile: #2c2c30; --sel: #3d8bfd;
+      --bg: #141416; --panel: #1f1f22; --panel-2: #26262a; --text: #f5f5f7; --muted: #a1a1a6;
+      --line: #2e2e33; --line-strong: #3a3a40; --accent: #3d8bfd; --accent-soft: #1b2b44;
+      --danger: #ff6b6b; --danger-soft: #3a1d1f; --ok: #4cd07d; --ok-soft: #173123;
+      --warn: #ffb74d; --warn-soft: #3a2c14; --tile: #2a2a2f;
+      --deleted: #ff6b6b; --existing: #4cd07d; --deep: #a1a1a6;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.3);
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  header { padding: 18px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
-           display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  header h1 { margin: 0; font-size: 18px; }
-  header small { color: var(--muted); }
-  main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 120px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-           padding: 18px; margin-bottom: 16px; }
-  .panel h2 { margin: 0 0 12px; font-size: 15px; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .hidden { display: none !important; }
   .muted { color: var(--muted); }
-  .err { color: var(--danger); white-space: pre-wrap; }
-  .okc { color: var(--ok); }
-  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
-           padding: 7px 14px; border-radius: 8px; cursor: pointer; }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
-  button:disabled { opacity: .45; cursor: default; }
-  input[type=text] { font: inherit; width: 100%; padding: 7px 10px; border-radius: 8px;
-                     border: 1px solid var(--line); background: var(--bg); color: var(--text); }
-  .devices { display: grid; gap: 8px; margin-bottom: 12px; }
-  .dev { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line);
-         border-radius: 10px; cursor: pointer; }
-  .dev.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-  .dev b { display: block; }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .grow { flex: 1; min-width: 200px; }
-  details { margin: 10px 0; } summary { cursor: pointer; color: var(--muted); }
-  .bar { height: 8px; background: var(--tile); border-radius: 99px; overflow: hidden; margin: 10px 0; }
-  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-  .toolbar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 10px 0;
-             display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-  .tile { position: relative; background: var(--panel); border: 2px solid transparent; border-radius: 10px;
-          overflow: hidden; content-visibility: auto; contain-intrinsic-size: 160px 200px; }
-  .tile.sel { border-color: var(--sel); }
-  .thumb { aspect-ratio: 1; background: var(--tile); overflow: hidden; cursor: zoom-in;
-           display: flex; align-items: center; justify-content: center; }
-  .thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .meta { padding: 6px 8px; font-size: 12px; color: var(--muted); display: flex;
-          justify-content: space-between; gap: 6px; }
-  .tile input { position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; cursor: pointer; }
+  .small { font-size: 12.5px; }
+
+  /* ---------- top bar */
+  .topbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 16px;
+            padding: 12px 20px; background: var(--panel); background: color-mix(in srgb, var(--panel) 88%, transparent);
+            backdrop-filter: saturate(180%) blur(16px); -webkit-backdrop-filter: saturate(180%) blur(16px);
+            border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; white-space: nowrap; }
+  .brand svg { width: 28px; height: 28px; flex: none; }
+  .steps { display: flex; gap: 6px; margin: 0 auto; }
+  .step { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px;
+          font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .step b { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+            font-size: 11px; background: var(--tile); color: var(--muted); }
+  .step.on { color: var(--text); background: var(--accent-soft); }
+  .step.on b { background: var(--accent); color: #fff; }
+  .step.done b { background: var(--ok); color: #fff; }
+  @media (max-width: 720px) { .steps { display: none; } .topbar { justify-content: space-between; } }
+
+  .btn { border: 1px solid var(--line-strong); background: var(--panel); padding: 7px 14px;
+         border-radius: 9px; font-weight: 500; transition: border-color .15s, background .15s; }
+  .btn:hover:not(:disabled) { border-color: var(--accent); }
+  .btn:focus-visible, .chip:focus-visible, .tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn.big { padding: 11px 22px; font-size: 15px; border-radius: 11px; }
+  .btn.ghost { border-color: transparent; background: transparent; }
+  .btn.ghost:hover:not(:disabled) { background: var(--tile); border-color: transparent; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 20px 140px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+
+  /* ---------- pick view */
+  .hero { text-align: center; padding: 28px 16px 8px; }
+  .hero h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -.02em; }
+  .hero p { margin: 0; color: var(--muted); }
+  .pick { max-width: 720px; margin: 22px auto 0; padding: 22px; }
+  .pick h2 { margin: 0 0 4px; font-size: 15px; }
+  .devices { display: grid; gap: 10px; margin: 14px 0; }
+  .dev { display: flex; gap: 14px; align-items: center; padding: 14px; border: 1.5px solid var(--line);
+         border-radius: 13px; cursor: pointer; background: var(--panel-2); transition: border-color .15s, background .15s; }
+  .dev:hover { border-color: var(--line-strong); }
+  .dev.on { border-color: var(--accent); background: var(--accent-soft); }
+  .dev input { position: absolute; opacity: 0; pointer-events: none; }
+  .dev svg { width: 38px; height: 38px; flex: none; color: var(--accent); }
+  .dev .t { font-weight: 600; }
+  .dev .s { font-size: 12.5px; color: var(--muted); }
+  .dev .size { margin-left: auto; font-weight: 600; white-space: nowrap; }
+  .nodev { padding: 26px; text-align: center; border: 1.5px dashed var(--line-strong); border-radius: 13px; color: var(--muted); }
+  .nodev .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+                  margin-right: 8px; animation: pulse 1.4s infinite; vertical-align: middle; }
+  @keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+  .opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; cursor: pointer; }
+  .opt input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }
+  details { margin-top: 4px; } summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 6px 0; }
+  input[type=text] { font: inherit; width: 100%; padding: 8px 11px; border-radius: 9px;
+                     border: 1px solid var(--line-strong); background: var(--bg); color: var(--text); }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .pick-actions { display: flex; align-items: center; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
+  .alert { padding: 10px 12px; border-radius: 10px; font-size: 13px; margin-top: 12px; white-space: pre-wrap; }
+  .alert.err { background: var(--danger-soft); color: var(--danger); }
+  .alert.warn { background: var(--warn-soft); color: var(--warn); }
+  .alert.info { background: var(--accent-soft); color: var(--text); }
+  .alert:empty { display: none; }
+
+  /* ---------- scan view */
+  .scanhead { padding: 18px 20px; }
+  .scanrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .scanrow svg { width: 34px; height: 34px; color: var(--accent); flex: none; }
+  .scantitle { font-weight: 650; font-size: 16px; }
+  .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--accent-soft);
+             border-top-color: var(--accent); animation: spin .8s linear infinite; display: inline-block;
+             vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0 12px; }
+  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; }
+  .stat .v { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--muted); }
+  @media (max-width: 640px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .mapwrap { position: relative; }
+  #map { width: 100%; height: 26px; display: block; border-radius: 8px; }
+  .maplegend { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 10px; vertical-align: 0; }
+
+  /* ---------- toolbar + grid */
+  .toolbar { position: sticky; top: 53px; z-index: 20; display: flex; align-items: center; gap: 10px;
+             flex-wrap: wrap; padding: 12px 0; margin-top: 10px; background: var(--bg); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 99px; padding: 5px 12px;
+          font-size: 13px; font-weight: 500; display: inline-flex; gap: 6px; align-items: center; }
+  .chip .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .chip.on .n { color: inherit; opacity: .7; }
+  .grow { flex: 1; }
+  select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line-strong);
+           background: var(--panel); color: var(--text); }
+  .zoom { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .zoom input { width: 90px; accent-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile-size), 1fr)); gap: 10px; }
+  .tile { position: relative; border-radius: 12px; overflow: hidden; background: var(--panel); cursor: zoom-in;
+          border: 1px solid var(--line); content-visibility: auto; contain-intrinsic-size: var(--tile-size) calc(var(--tile-size) + 44px);
+          transition: transform .12s, box-shadow .12s; outline: none; }
+  .grid.selecting .tile { cursor: pointer; }
+  .tile:hover { box-shadow: var(--shadow); }
+  .tile .ph { aspect-ratio: 1; background: var(--tile); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .tile img { width: 100%; height: 100%; object-fit: cover; transition: transform .15s; }
+  .tile.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .tile.sel img { transform: scale(.9); border-radius: 6px; }
+  .tile .chk { position: absolute; top: 8px; left: 8px; width: 24px; height: 24px; border-radius: 50%;
+               border: 2px solid rgba(255,255,255,.95); background: rgba(0,0,0,.25); display: grid; place-items: center;
+               opacity: 0; transition: opacity .12s; padding: 0; }
+  .tile:hover .chk, .grid.selecting .chk, .tile.sel .chk { opacity: 1; }
+  .tile.sel .chk { background: var(--accent); border-color: var(--accent); }
+  .tile .chk svg { width: 14px; height: 14px; color: #fff; opacity: 0; }
+  .tile.sel .chk svg { opacity: 1; }
+  .tile .badge { position: absolute; top: 9px; right: 9px; font-size: 10.5px; font-weight: 650; padding: 2px 7px;
+                 border-radius: 99px; color: #fff; letter-spacing: .02em; }
+  .badge.deleted { background: var(--deleted); } .badge.existing { background: var(--existing); }
+  .badge.unknown { background: rgba(0,0,0,.55); }
+  .tile .cap { padding: 7px 9px 8px; }
+  .tile .nm { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .mt { font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
   .o2 { transform: scaleX(-1); } .o3 { transform: rotate(180deg); } .o4 { transform: scaleY(-1); }
   .o5 { transform: rotate(90deg) scaleX(-1); } .o6 { transform: rotate(90deg); }
   .o7 { transform: rotate(270deg) scaleX(-1); } .o8 { transform: rotate(270deg); }
-  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; z-index: 20;
-           align-items: center; justify-content: center; padding: 16px; }
+  .tile.sel img.o6 { transform: rotate(90deg) scale(.9); } .tile.sel img.o8 { transform: rotate(270deg) scale(.9); }
+  .tile.sel img.o3 { transform: rotate(180deg) scale(.9); }
+  .empty { text-align: center; padding: 56px 20px; color: var(--muted); }
+  .empty svg { width: 64px; height: 64px; color: var(--line-strong); }
+  .empty h3 { color: var(--text); margin: 10px 0 6px; font-size: 16px; }
+  .empty p { max-width: 460px; margin: 0 auto; }
+
+  /* ---------- action bar */
+  .actionbar { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 140%); z-index: 40;
+               display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 18px; border-radius: 16px;
+               background: var(--text); color: var(--bg); box-shadow: 0 10px 40px rgba(0,0,0,.3);
+               transition: transform .25s cubic-bezier(.2,.8,.2,1), visibility .25s; max-width: calc(100% - 32px);
+               visibility: hidden; }
+  .actionbar.show { transform: translate(-50%, 0); visibility: visible; }
+  .actionbar .btn.ghost { color: var(--bg); }
+  .actionbar .btn.ghost:hover { background: rgba(127,127,127,.25); }
+  .actionbar strong { white-space: nowrap; }
+
+  /* ---------- modals */
+  .modal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center;
+           padding: 16px; background: rgba(0,0,0,.45); }
   .modal.show { display: flex; }
-  .dialog { background: var(--panel); border-radius: 14px; padding: 20px; width: min(560px, 100%);
-            border: 1px solid var(--line); }
-  .dialog h2 { margin-top: 0; }
-  #lightbox { background: rgba(0,0,0,.9); flex-direction: column; gap: 10px; cursor: zoom-out; }
-  #lightbox img { max-width: 96vw; max-height: 88vh; object-fit: contain; }
-  #lightbox .cap { color: #ddd; font-size: 13px; }
-  .empty { text-align: center; padding: 40px; color: var(--muted); }
-  .name { padding: 6px 8px 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden;
-          text-overflow: ellipsis; }
-  .badge { position: absolute; top: 8px; right: 8px; font-size: 11px; font-weight: 600; padding: 2px 7px;
-           border-radius: 99px; background: rgba(0,0,0,.6); color: #fff; }
-  .badge.deleted { background: #c62828; } .badge.existing { background: #1b7f3b; }
-  select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line);
-           background: var(--panel); color: var(--text); }
-  .warn { color: #b26a00; } @media (prefers-color-scheme: dark) { .warn { color: #ffb74d; } }
+  .dialog { width: min(560px, 100%); padding: 22px; }
+  .dialog h2 { margin: 0 0 4px; font-size: 18px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .bar { height: 8px; background: var(--tile); border-radius: 99px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+  #lightbox { background: rgba(10,10,12,.97); flex-direction: column; padding: 0; }
+  .lb-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 10px;
+            padding: 14px 16px; color: #eee; }
+  .lb-top .info { font-size: 13px; line-height: 1.35; overflow: hidden; }
+  .lb-top .info b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lb-btn { border: 0; background: rgba(255,255,255,.12); color: #fff; border-radius: 10px; padding: 8px 12px; font-weight: 600; }
+  .lb-btn:hover { background: rgba(255,255,255,.22); }
+  .lb-btn.on { background: var(--accent); }
+  #lbimg { max-width: 92vw; max-height: 80vh; object-fit: contain; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 46px; height: 46px; border-radius: 50%;
+            border: 0; background: rgba(255,255,255,.12); color: #fff; font-size: 22px; }
+  .lb-nav:hover { background: rgba(255,255,255,.25); }
+  #lbprev { left: 16px; } #lbnext { right: 16px; }
+  .lb-loading { position: absolute; color: #aaa; font-size: 13px; }
+  .credit { text-align: center; font-size: 12px; color: var(--muted); padding: 0 16px 28px; margin-top: -110px; }
+  .credit a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+  .credit a:hover { color: var(--text); border-color: var(--text); }
 </style>
 </head>
 <body>
-<header>
-  <div><h1>JPEG Recovery</h1><small>Find and restore .jpg photos from a pendrive or SD card</small></div>
-  <button id="quit" title="Stop the app">Quit</button>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-card" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M7 2.8h8.6L20 7.2v13a1 1 0 0 1-1 1H7a2 2 0 0 1-2-2V4.8a2 2 0 0 1 2-2Z"/><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M9 6v3M12 6v3M15 6v3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8.5" cy="9.5" r="1.6" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" d="m3.5 17 5-5 4 4 3-3 5 5"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#1f63e0"/><rect x="7" y="9" width="17" height="13" rx="2" fill="#fff"/><path d="m8.5 20 4.5-5 3.5 3.5 2-2 4 3.5z" fill="#2a78e0"/><circle cx="20" cy="12.5" r="1.6" fill="#ffc400"/><circle cx="23.5" cy="22.5" r="5" fill="#29b25a" stroke="#fff" stroke-width="1.5"/><path d="M23.5 25v-4.5m-2 2 2-2 2 2" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    JPEG Recovery
+  </div>
+  <nav class="steps" aria-label="Progress">
+    <span class="step on" id="st1"><b>1</b>Choose card</span>
+    <span class="step" id="st2"><b>2</b>Scan</span>
+    <span class="step" id="st3"><b>3</b>Recover</span>
+  </nav>
+  <button class="btn ghost" id="quit" title="Stop JPEG Recovery">Quit</button>
 </header>
+
 <main>
-  <section class="panel" id="pick">
-    <h2>1. Choose the pendrive or SD card</h2>
-    <div id="rootwarn" class="err" style="display:none;margin-bottom:10px">
-      The app is not running with admin rights, so it can't read the raw card. Click Quit, then open JPEG Recovery again and enter your Mac password.
+  <!-- ======================= 1. pick -->
+  <section id="viewPick">
+    <div class="hero">
+      <h1>Recover photos from a card</h1>
+      <p>Finds deleted and lost .jpg photos on SD cards and pendrives, and saves them at full original quality.</p>
     </div>
-    <div class="devices" id="devices"><div class="muted">Looking for drives…</div></div>
-    <div class="row">
-      <button id="refresh">Refresh list</button>
-      <span class="muted">Plug in the card and click Refresh if it is not listed.</span>
-    </div>
-    <details>
-      <summary>Advanced: scan a disk image or device path</summary>
-      <div class="row" style="margin-top:8px">
-        <input type="text" id="custom" class="grow" placeholder="/dev/rdisk4 or /path/to/card.img">
+    <div class="card pick">
+      <div class="row" style="justify-content:space-between">
+        <h2>Choose the pendrive or SD card</h2>
+        <button class="btn ghost small" id="refresh">Refresh</button>
       </div>
-    </details>
-    <label class="row" style="margin-top:10px;cursor:pointer">
-      <input type="checkbox" id="unmount" checked>
-      <span>Unmount the card before scanning <span class="muted">(recommended: stops macOS from writing to it and overwriting deleted photos)</span></span>
-    </label>
-    <div class="row" style="margin-top:12px">
-      <button class="primary" id="scan" disabled>Scan for photos</button>
-      <span class="muted">Read-only. Nothing is written to the card.</span>
+      <div class="alert err hidden" id="rootwarn">The app isn't running with admin rights, so it can't read the card. Click Quit, then open JPEG Recovery again (or run ./run.sh) and enter your Mac password.</div>
+      <div class="devices" id="devices"></div>
+      <label class="opt">
+        <input type="checkbox" id="unmount" checked>
+        <span>Unmount the card before scanning <span class="muted small">(recommended: stops macOS from writing to the card and overwriting deleted photos)</span></span>
+      </label>
+      <details>
+        <summary>Advanced: scan a disk image or a specific device</summary>
+        <input type="text" id="custom" placeholder="/dev/rdisk4 or /path/to/card.img" style="margin-top:6px">
+      </details>
+      <div class="pick-actions">
+        <button class="btn primary big" id="scan" disabled>Scan for photos</button>
+        <span class="muted small">Read-only: nothing is written to the card.</span>
+      </div>
+      <div class="alert err" id="scanerr"></div>
     </div>
-    <div id="scanerr" class="err" style="margin-top:8px"></div>
   </section>
 
-  <section class="panel" id="progress" style="display:none">
-    <h2 id="ptitle">2. Scanning…</h2>
-    <div class="bar"><div id="pbar"></div></div>
-    <div class="row" style="justify-content:space-between">
-      <span id="ptext" class="muted"></span>
-      <button id="cancel">Stop scan</button>
+  <!-- ======================= 2+3. scan + results -->
+  <section id="viewScan" class="hidden">
+    <div class="card scanhead">
+      <div class="scanrow">
+        <svg><use href="#i-card"/></svg>
+        <div style="min-width:0">
+          <div class="scantitle" id="ptitle">Scanning…</div>
+          <div class="muted small" id="driveLabel"></div>
+        </div>
+        <span class="grow"></span>
+        <button class="btn" id="cancel">Stop scan</button>
+        <button class="btn hidden" id="newScan">Scan another card</button>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="sFound">0</div><div class="l">photos found</div></div>
+        <div class="stat"><div class="v" id="sPct">0%</div><div class="l" id="sPctL">scanned</div></div>
+        <div class="stat"><div class="v" id="sEta">–</div><div class="l">time left</div></div>
+        <div class="stat"><div class="v" id="sSpeed">–</div><div class="l">read speed</div></div>
+      </div>
+      <div class="mapwrap"><canvas id="map" aria-label="Map of the card: scanned area and where photos were found"></canvas></div>
+      <div class="maplegend">
+        <span>Card map: start → end</span>
+        <span><span class="dot" style="background:var(--deleted)"></span>Deleted<span class="dot" style="background:var(--existing)"></span>Existing<span class="dot" style="background:var(--deep)"></span>Deep scan</span>
+      </div>
+      <div class="alert info" id="pnote"></div>
+      <div class="alert warn" id="pwarn"></div>
+      <div class="alert err" id="perr"></div>
     </div>
-    <div id="pnote" class="muted" style="margin-top:6px"></div>
-    <div id="pwarn" class="warn" style="margin-top:6px"></div>
-    <div id="perr" class="err"></div>
-  </section>
 
-  <section id="results" style="display:none">
     <div class="toolbar">
-      <strong id="count">0 photos found</strong>
-      <span class="muted" id="selcount"></span>
+      <div class="chips" id="chips">
+        <button class="chip on" data-f="all">All <span class="n" id="cAll">0</span></button>
+        <button class="chip" data-f="deleted">Deleted <span class="n" id="cDeleted">0</span></button>
+        <button class="chip" data-f="existing">Existing <span class="n" id="cExisting">0</span></button>
+        <button class="chip" data-f="unknown">Deep scan <span class="n" id="cUnknown">0</span></button>
+      </div>
       <span class="grow"></span>
-      <select id="filter" title="Which photos to show">
-        <option value="all">Show all</option>
-        <option value="deleted">Deleted only</option>
-        <option value="existing">Existing files only</option>
-        <option value="unknown">Found by deep scan only</option>
+      <select id="sort" title="Sort photos">
+        <option value="pos">Card order</option>
+        <option value="date">Date taken (newest)</option>
+        <option value="size">Size (largest)</option>
       </select>
-      <button id="selall">Select all</button>
-      <button id="selnone">Select none</button>
-      <button class="primary" id="recover" disabled>Recover selected</button>
+      <label class="zoom" title="Thumbnail size"><svg width="14" height="14"><use href="#i-photo"/></svg><input type="range" id="zoom" min="110" max="300" value="168"></label>
+      <button class="btn small" id="selall">Select all</button>
     </div>
+
     <div class="grid" id="grid"></div>
-    <div class="empty" id="empty" style="display:none">No JPEG photos were found on this drive.</div>
+    <div class="empty hidden" id="empty">
+      <svg><use href="#i-photo"/></svg>
+      <h3 id="emptyT"></h3>
+      <p id="emptyP"></p>
+    </div>
   </section>
 </main>
+<footer class="credit">Made by <a href="https://github.com/vatsalmotiani" target="_blank" rel="noopener">Vatsal Motiani</a></footer>
 
-<div class="modal" id="saveModal">
-  <div class="dialog">
-    <h2>Save recovered photos</h2>
-    <p class="muted" id="saveinfo"></p>
-    <label class="muted">Destination folder on your Mac (created if missing):</label>
+<!-- action bar -->
+<div class="actionbar" id="actionbar" role="region" aria-label="Selection">
+  <strong id="selsummary">0 selected</strong>
+  <button class="btn ghost small" id="clearsel">Clear</button>
+  <button class="btn primary" id="recover">Recover</button>
+</div>
+
+<!-- save dialog -->
+<div class="modal" id="saveModal" role="dialog" aria-modal="true" aria-labelledby="saveTitle">
+  <div class="card dialog">
+    <h2 id="saveTitle">Save recovered photos</h2>
+    <p class="muted small" id="saveinfo" style="margin:0 0 16px"></p>
+    <label class="small muted" for="dest">Save to a folder on your Mac (created if missing)</label>
     <div class="row" style="margin:6px 0 14px">
-      <input type="text" id="dest" class="grow">
-      <button id="browse">Choose…</button>
+      <input type="text" id="dest">
+      <button class="btn" id="browse">Choose…</button>
     </div>
-    <div id="saveprog" style="display:none">
+    <div id="saveprog" class="hidden">
       <div class="bar"><div id="sbar"></div></div>
-      <div id="stext" class="muted"></div>
+      <div id="stext" class="small" style="margin-top:8px"></div>
     </div>
-    <div id="saveerr" class="err" style="margin-bottom:10px"></div>
-    <div class="row" style="justify-content:flex-end">
-      <button id="reveal" style="display:none">Show in Finder</button>
-      <button id="closeSave">Cancel</button>
-      <button class="primary" id="doSave">Save</button>
+    <div class="alert err" id="saveerr"></div>
+    <div class="dlg-actions">
+      <button class="btn hidden" id="reveal">Show in Finder</button>
+      <button class="btn" id="closeSave">Cancel</button>
+      <button class="btn primary" id="doSave">Save photos</button>
     </div>
   </div>
 </div>
 
-<div class="modal" id="lightbox"><img id="lbimg" alt=""><div class="cap" id="lbcap"></div></div>
+<!-- viewer -->
+<div class="modal" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer">
+  <div class="lb-top">
+    <div class="info"><b id="lbname"></b><span id="lbcap"></span></div>
+    <span class="grow"></span>
+    <button class="lb-btn" id="lbsel">Select</button>
+    <button class="lb-btn" id="lbclose" title="Close (Esc)">✕</button>
+  </div>
+  <span class="lb-loading" id="lbloading">Loading full resolution…</span>
+  <img id="lbimg" alt="">
+  <button class="lb-nav" id="lbprev" title="Previous (←)">‹</button>
+  <button class="lb-nav" id="lbnext" title="Next (→)">›</button>
+</div>
 
 <script>
+"use strict";
 const T = "__TOKEN__";
 const $ = id => document.getElementById(id);
-let chosen = null, since = 0, gen = 0, total = 0, polling = null, savePoll = null;
-const selected = new Set();
-const items = [];
 
+const state = {
+  chosen: null, since: 0, gen: 0, total: 0, polling: null, savePoll: null, busy: false,
+  filter: "all", sort: "pos", anchor: null, lbIndex: -1, lastScan: null, resortTimer: null,
+};
+const items = [];            // by id
+const tiles = new Map();     // id -> element
+const selected = new Set();
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+
+// ---------------------------------------------------------------- helpers
 async function api(path, body) {
   const opts = body === undefined ? { headers: { "X-Token": T } }
     : { method: "POST", headers: { "X-Token": T, "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -190,151 +384,381 @@ async function api(path, body) {
 }
 function fmtSize(b) {
   if (!b) return "0 B";
-  const u = ["B","KB","MB","GB","TB"]; let i = 0;
+  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0;
   while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; }
   return (i ? b.toFixed(b < 10 ? 1 : 0) : b) + " " + u[i];
 }
 function fmtTime(s) {
-  s = Math.round(s); if (s < 60) return s + "s";
-  const m = Math.floor(s / 60); if (m < 60) return m + "m " + (s % 60) + "s";
+  s = Math.max(0, Math.round(s)); if (s < 60) return s + "s";
+  const m = Math.floor(s / 60); if (m < 60) return m + " min";
   return Math.floor(m / 60) + "h " + (m % 60) + "m";
 }
-function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-
-async function loadDevices() {
-  $("devices").innerHTML = '<div class="muted">Looking for drives…</div>';
-  try {
-    const j = await api("/api/devices");
-    $("rootwarn").style.display = j.root ? "none" : "block";
-    const box = $("devices"); box.innerHTML = "";
-    if (!j.devices.length) {
-      box.innerHTML = '<div class="muted">No external drives found. Insert the pendrive / SD card and click Refresh.</div>';
-    }
-    j.devices.forEach(d => {
-      const el = document.createElement("label");
-      el.className = "dev";
-      el.innerHTML = '<input type="radio" name="dev"><div><b>' + esc(d.name) + ' — ' + fmtSize(d.size) +
-        '</b><span class="muted">' + esc(d.id) + (d.protocol ? " · " + esc(d.protocol) : "") +
-        (d.formats && d.formats.length ? " · " + esc(d.formats.join(", ")) : "") +
-        (d.volumes.length ? " · " + esc(d.volumes.join(", ")) : "") + '</span></div>';
-      el.querySelector("input").onchange = () => {
-        chosen = d.path; $("custom").value = "";
-        document.querySelectorAll(".dev").forEach(x => x.classList.remove("on"));
-        el.classList.add("on"); updateScanBtn();
-      };
-      box.appendChild(el);
-    });
-  } catch (e) { $("devices").innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }
-  chosen = null; updateScanBtn();
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function prettyDate(d) { return d ? d.slice(0, 10).replace(/:/g, "-") + " " + d.slice(11, 16) : ""; }
+function label(it) { return it.name || (it.date ? "Photo " + prettyDate(it.date) : "Photo " + (it.id + 1)); }
+function dateKey(it) {
+  if (it.date) return it.date;
+  if (it.mtime) { const d = new Date(it.mtime * 1000); return d.toISOString().slice(0, 19).replace("T", " ").replace(/-/g, ":"); }
+  return "";
 }
-function target() { return $("custom").value.trim() || chosen; }
-function updateScanBtn() { $("scan").disabled = !target() || !!polling; }
+function setStep(n) {
+  ["st1", "st2", "st3"].forEach((id, i) => {
+    $(id).classList.toggle("on", i + 1 === n);
+    $(id).classList.toggle("done", i + 1 < n);
+  });
+}
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+// ---------------------------------------------------------------- 1. pick
+let devTimer = null;
+async function loadDevices(quiet) {
+  if (!quiet) $("devices").innerHTML = '<div class="nodev">Looking for drives…</div>';
+  let j;
+  try { j = await api("/api/devices"); }
+  catch (e) { $("devices").innerHTML = '<div class="alert err">' + esc(e.message) + '</div>'; return; }
+  $("rootwarn").classList.toggle("hidden", !!j.root);
+  const sig = JSON.stringify(j.devices.map(d => d.path + d.size + d.volumes.join()));
+  if (quiet && sig === loadDevices.sig) return;  // nothing changed
+  loadDevices.sig = sig;
+  const box = $("devices"); box.innerHTML = "";
+  if (!j.devices.length) {
+    box.innerHTML = '<div class="nodev"><span class="pulse"></span>Waiting for a card… Plug in the pendrive or SD card (or card reader).</div>';
+    state.chosen = null; updateScanBtn(); return;
+  }
+  j.devices.forEach(d => {
+    const el = document.createElement("label");
+    el.className = "dev";
+    const bits = [d.protocol, (d.formats || []).join(", "), d.volumes.length ? "“" + d.volumes.join("”, “") + "”" : ""].filter(Boolean);
+    el.innerHTML = '<input type="radio" name="dev"><svg><use href="#i-card"/></svg><div style="min-width:0"><div class="t">' +
+      esc(d.name) + '</div><div class="s">' + esc(bits.join(" · ") || d.id) + ' · ' + esc(d.id) + '</div></div><div class="size">' + fmtSize(d.size) + '</div>';
+    const input = el.querySelector("input");
+    input.onchange = () => choose(d.path, el);
+    box.appendChild(el);
+    if (state.chosen === d.path) { input.checked = true; el.classList.add("on"); }
+  });
+  if (!j.devices.some(d => d.path === state.chosen)) state.chosen = null;
+  if (j.devices.length === 1 && !state.chosen && !$("custom").value.trim()) {
+    const el = box.querySelector(".dev"); el.querySelector("input").checked = true; choose(j.devices[0].path, el);
+  }
+  updateScanBtn();
+}
+function choose(path, el) {
+  state.chosen = path; $("custom").value = "";
+  document.querySelectorAll(".dev").forEach(x => x.classList.remove("on"));
+  el.classList.add("on"); updateScanBtn();
+}
+function target() { return $("custom").value.trim() || state.chosen; }
+function updateScanBtn() { $("scan").disabled = !target() || !!state.polling; }
 $("custom").oninput = () => {
   if ($("custom").value.trim()) {
-    chosen = null;
-    document.querySelectorAll(".dev input").forEach(x => { x.checked = false; x.closest(".dev").classList.remove("on"); });
+    state.chosen = null;
+    document.querySelectorAll(".dev").forEach(x => { x.classList.remove("on"); x.querySelector("input").checked = false; });
   }
   updateScanBtn();
 };
-$("refresh").onclick = loadDevices;
+$("refresh").onclick = () => { loadDevices.sig = null; loadDevices(false); };
+function startDevicePolling() { stopDevicePolling(); devTimer = setInterval(() => loadDevices(true), 3000); }
+function stopDevicePolling() { if (devTimer) clearInterval(devTimer); devTimer = null; }
 
 $("scan").onclick = async () => {
   $("scanerr").textContent = "";
-  try { await api("/api/scan", { path: target(), unmount: $("unmount").checked }); }
-  catch (e) { $("scanerr").textContent = e.message; return; }
-  since = 0; items.length = 0; selected.clear();
-  $("grid").innerHTML = ""; $("empty").style.display = "none";
-  $("progress").style.display = "block"; $("results").style.display = "block";
-  $("perr").textContent = ""; $("pwarn").textContent = ""; $("cancel").style.display = "";
-  $("ptitle").textContent = "2. Scanning…";
-  updateCounts();
-  polling = setInterval(poll, 600); updateScanBtn(); poll();
+  const t = target();
+  $("scan").disabled = true;
+  try { await api("/api/scan", { path: t, unmount: $("unmount").checked }); }
+  catch (e) { $("scanerr").textContent = e.message; updateScanBtn(); return; }
+  resetResults();
+  const devEl = document.querySelector(".dev.on .t");
+  $("driveLabel").textContent = (devEl ? devEl.textContent + " · " : "") + t;
+  showScanView();
+  state.polling = setInterval(poll, 700); poll();
 };
-$("cancel").onclick = () => api("/api/cancel", {}).catch(() => {});
 
-let busy = false;
+function resetResults() {
+  state.since = 0; items.length = 0; tiles.clear(); selected.clear(); state.anchor = null;
+  $("grid").innerHTML = ""; ["pnote", "pwarn", "perr"].forEach(id => $(id).textContent = "");
+  updateCounts(); updateSelection();
+}
+function showScanView() {
+  stopDevicePolling();
+  $("viewPick").classList.add("hidden"); $("viewScan").classList.remove("hidden");
+  $("cancel").classList.remove("hidden"); $("newScan").classList.add("hidden");
+  setStep(2); window.scrollTo(0, 0);
+}
+$("newScan").onclick = () => {
+  $("viewScan").classList.add("hidden"); $("viewPick").classList.remove("hidden");
+  setStep(1); document.title = "JPEG Recovery";
+  loadDevices.sig = null; loadDevices(false); startDevicePolling();
+};
+$("cancel").onclick = () => { $("cancel").disabled = true; api("/api/cancel", {}).catch(() => {}); };
+
+// ---------------------------------------------------------------- 2. scan progress
 async function poll() {
-  if (busy) return; busy = true;
+  if (state.busy) return; state.busy = true;
   try {
-    const s = await api("/api/status?since=" + since);
+    const s = await api("/api/status?since=" + state.since);
     if (s.state === "idle") return;
-    gen = s.gen; total = s.total;
-    const fsInfo = s.volumes && s.volumes.length ? "File system found: " + s.volumes.map(v => v.split(" ")[0]).join(", ") + " (original names and dates recovered where possible)." : "";
-    $("pnote").textContent = [s.note, fsInfo].filter(Boolean).join(" ");
-    $("pwarn").textContent = s.bad_bytes ? "Warning: " + fmtSize(s.bad_bytes) + " of the card could not be read (damaged area). Those parts were skipped; the card may be failing, so recover your photos soon." : "";
-    if (s.state === "scanning") $("ptitle").textContent = "2. Scanning… (" + s.phase + ")";
-    s.items.forEach(addTile); since += s.items.length;
-    const pct = s.total ? (100 * s.scanned / s.total) : 0;
-    $("pbar").style.width = pct.toFixed(1) + "%";
-    const eta = s.speed > 0 ? (s.total - s.scanned) / s.speed : 0;
-    $("ptext").textContent = fmtSize(s.scanned) + " of " + fmtSize(s.total) + " (" + pct.toFixed(1) + "%) · " +
-      fmtSize(s.speed) + "/s · " + s.count + " photos" + (s.state === "scanning" && eta ? " · ~" + fmtTime(eta) + " left" : "");
+    state.lastScan = s; state.gen = s.gen; state.total = s.total;
+    const fresh = s.items;
+    fresh.forEach(addItem); state.since += fresh.length;
+    if (fresh.length) { updateCounts(); scheduleResort(); }
+    renderProgress(s);
     if (s.state === "done") {
-      clearInterval(polling); polling = null; updateScanBtn();
-      $("cancel").style.display = "none";
-      $("ptitle").textContent = s.error ? "Scan stopped with an error" : s.cancelled ? "Scan stopped — showing photos found so far" : "2. Scan complete";
-      if (s.error) $("perr").textContent = s.error + "\nPhotos found before the error are listed below.";
-      if (!s.count) $("empty").style.display = "block";
+      clearInterval(state.polling); state.polling = null; updateScanBtn();
+      $("cancel").classList.add("hidden"); $("cancel").disabled = false; $("newScan").classList.remove("hidden");
+      if (s.error) $("perr").textContent = s.error;
+      if (items.length) setStep(3);
     }
-  } catch (e) { $("perr").textContent = e.message; }
-  finally { busy = false; }
+    updateEmpty(s);
+  } catch (e) { $("perr").textContent = "Lost contact with the app: " + e.message + ". If you quit it, open JPEG Recovery again."; }
+  finally { state.busy = false; }
 }
 
-function addTile(it) {
-  items.push(it);
+function renderProgress(s) {
+  const pct = s.total ? 100 * s.scanned / s.total : 0;
+  const scanning = s.state === "scanning";
+  const remaining = s.speed > 0 ? (s.total - s.scanned) / s.speed : 0;
+  $("sFound").textContent = items.length.toLocaleString();
+  $("sPct").textContent = (pct >= 99.95 ? 100 : pct < 10 ? pct.toFixed(1) : Math.floor(pct)) + "%";
+  $("sPctL").textContent = "of " + fmtSize(s.total) + " scanned";
+  $("sEta").textContent = scanning ? (s.scanned > 0 && remaining ? "~" + fmtTime(remaining) : "estimating…") : "done";
+  $("sSpeed").textContent = s.speed > 0 ? fmtSize(s.speed) + "/s" : "–";
+  let title;
+  if (scanning) title = '<span class="spinner"></span>' + esc(s.phase === "Deep scan" ? "Scanning the whole card…" : s.phase + "…");
+  else if (s.error) title = "Scan stopped with a problem";
+  else if (s.cancelled) title = "Scan stopped. Showing the photos found so far";
+  else title = "Scan complete: " + items.length.toLocaleString() + " photo" + (items.length === 1 ? "" : "s") + " found";
+  $("ptitle").innerHTML = title;
+  const fs = s.volumes && s.volumes.length ? "Card format: " + s.volumes.map(v => v.split(" ")[0]).join(", ") +
+    ". Original names and dates are shown where the card still has them." : "";
+  $("pnote").textContent = [s.note, fs].filter(Boolean).join(" ");
+  $("pwarn").textContent = s.bad_bytes ? fmtSize(s.bad_bytes) + " of the card couldn't be read (damaged area) and was skipped. The card may be failing, so save your photos soon." : "";
+  document.title = scanning ? Math.floor(pct) + "% · " + items.length + " photos · JPEG Recovery"
+                            : (items.length ? "✓ " + items.length + " photos · JPEG Recovery" : "JPEG Recovery");
+  drawMap(s);
+}
+
+function drawMap(s) {
+  const c = $("map"), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w) return;
+  if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = cssVar("--tile"); g.fillRect(0, 0, w, h);
+  const total = s.total || 1;
+  g.fillStyle = cssVar("--accent-soft"); g.fillRect(0, 0, w * Math.min(1, s.scanned / total), h);
+  const colors = { deleted: cssVar("--deleted"), existing: cssVar("--existing"), unknown: cssVar("--deep") };
+  for (const it of items) {
+    g.fillStyle = colors[it.status] || colors.unknown;
+    g.fillRect(Math.min(w - 2, Math.floor(w * it.offset / total)), 4, 2, h - 8);
+  }
+  if (s.state === "scanning") {
+    g.fillStyle = cssVar("--accent");
+    g.fillRect(Math.max(0, w * s.scanned / total - 1.5), 0, 3, h);
+  }
+}
+window.addEventListener("resize", () => { if (state.lastScan) drawMap(state.lastScan); });
+
+function updateEmpty(s) {
+  const visible = visibleOrder().length;
+  const show = !visible;
+  $("empty").classList.toggle("hidden", !show);
+  if (!show) return;
+  if (items.length) {
+    $("emptyT").textContent = "No photos in this filter";
+    $("emptyP").textContent = "Choose “All” to see every photo found.";
+  } else if (s.state === "scanning") {
+    const rem = s.speed > 0 ? (s.total - s.scanned) / s.speed : 0;
+    $("emptyT").textContent = "No photos found yet. Keep going";
+    $("emptyP").textContent = "Photos are often stored further into the card, so it's normal to see none for a while. " +
+      (rem ? "This card reads at " + fmtSize(s.speed) + "/s, so the rest of the scan takes about " + fmtTime(rem) + ". " : "") +
+      "Keep this window open; photos appear here as they're found.";
+  } else {
+    $("emptyT").textContent = s.cancelled ? "No photos found before the scan was stopped" : "No JPEG photos were found on this card";
+    $("emptyP").textContent = s.cancelled ? "Start the scan again and let it finish." :
+      "The card may hold HEIC photos (newer iPhones and Androids), may be encrypted, or the photos were overwritten. Run diagnose.sh in the app folder for a detailed report.";
+  }
+}
+
+// ---------------------------------------------------------------- grid
+function addItem(it) {
+  items[it.id] = it;
   const el = document.createElement("div");
-  el.className = "tile";
-  const rot = it.has_thumb && it.orientation > 1 ? " o" + it.orientation : "";
-  const label = { deleted: "Deleted", existing: "Existing", unknown: "Deep scan" }[it.status] || "";
-  const title = it.name ? (it.folder && it.folder !== "/" ? it.folder + "/" : "") + it.name : "Name not recoverable" + (it.date ? " · taken " + it.date : "");
-  el.dataset.status = it.status;
-  el.innerHTML = '<input type="checkbox" title="Select"><span class="badge ' + esc(it.status) + '">' + label + '</span>' +
-    '<div class="thumb"><img loading="lazy" decoding="async" class="' + rot +
-    '" src="/thumb/' + it.id + '?g=' + gen + '&t=' + T + '" alt=""></div><div class="name" title="' + esc(title) + '">' +
-    esc(it.name || (it.date ? it.date.slice(0, 10).replace(/:/g, "-") : "Photo " + (it.id + 1))) + '</div><div class="meta"><span>' +
-    it.width + '×' + it.height + '</span><span>' + fmtSize(it.length) + '</span></div>';
-  if (!matchesFilter(el)) el.style.display = "none";
-  const cb = el.querySelector("input");
-  cb.onchange = () => { cb.checked ? selected.add(it.id) : selected.delete(it.id); el.classList.toggle("sel", cb.checked); updateCounts(); };
-  el.querySelector(".thumb").onclick = () => openLightbox(it);
-  $("grid").appendChild(el);
-  updateCounts();
+  el.className = "tile"; el.tabIndex = 0; el.dataset.id = it.id;
+  const rot = it.has_thumb && it.orientation > 1 ? "o" + it.orientation : "";
+  const badge = { deleted: "Deleted", existing: "Existing", unknown: "Deep scan" }[it.status] || "";
+  const where = it.name && it.folder && it.folder !== "/" ? it.folder + "/" : "";
+  el.title = (where + label(it)) + (it.date ? "\nTaken " + prettyDate(it.date) : "") + (it.pieces > 1 ? "\nRebuilt from " + it.pieces + " pieces" : "");
+  el.innerHTML = '<div class="ph"><img loading="lazy" decoding="async" alt="" class="' + rot + '" src="/thumb/' + it.id +
+    '?g=' + state.gen + '&t=' + T + '"></div>' +
+    '<button class="chk" aria-label="Select photo"><svg><use href="#i-check"/></svg></button>' +
+    '<span class="badge ' + esc(it.status) + '">' + badge + '</span>' +
+    '<div class="cap"><div class="nm">' + esc(label(it)) + '</div><div class="mt"><span>' + it.width + '×' + it.height +
+    '</span><span>' + fmtSize(it.length) + '</span></div></div>';
+  el.querySelector(".chk").addEventListener("click", e => { e.stopPropagation(); toggle(it.id, e.shiftKey); });
+  el.addEventListener("click", e => {
+    if (selected.size || e.shiftKey || e.metaKey) toggle(it.id, e.shiftKey);
+    else openViewer(it.id);
+  });
+  el.addEventListener("keydown", e => {
+    if (e.key === " ") { e.preventDefault(); toggle(it.id, e.shiftKey); }
+    if (e.key === "Enter") openViewer(it.id);
+  });
+  if (!matches(it)) el.classList.add("hidden");
+  tiles.set(it.id, el);
+  $("grid").appendChild(el);  // other sort orders are re-applied shortly after
+}
+function matches(it) { return state.filter === "all" || it.status === state.filter; }
+function sortedItems() {
+  const list = items.filter(Boolean);
+  if (state.sort === "date") list.sort((a, b) => (dateKey(b) || "").localeCompare(dateKey(a) || "") || a.id - b.id);
+  else if (state.sort === "size") list.sort((a, b) => b.length - a.length || a.id - b.id);
+  else list.sort((a, b) => a.id - b.id);
+  return list;
+}
+function applyView() {
+  const grid = $("grid"), frag = document.createDocumentFragment();
+  for (const it of sortedItems()) {
+    const el = tiles.get(it.id);
+    el.classList.toggle("hidden", !matches(it));
+    frag.appendChild(el);
+  }
+  grid.appendChild(frag);
+  if (state.lastScan) updateEmpty(state.lastScan);
+}
+function scheduleResort() {
+  if (state.sort === "pos") { if (state.lastScan) updateEmpty(state.lastScan); return; }
+  if (state.resortTimer) return;
+  state.resortTimer = setTimeout(() => { state.resortTimer = null; applyView(); }, 1500);
+}
+function visibleOrder() {
+  return [...$("grid").children].filter(el => !el.classList.contains("hidden")).map(el => +el.dataset.id);
 }
 function updateCounts() {
-  $("count").textContent = items.length + " photo" + (items.length === 1 ? "" : "s") + " found";
-  $("selcount").textContent = selected.size ? selected.size + " selected" : "";
-  $("recover").disabled = !selected.size;
-  $("recover").textContent = selected.size ? "Recover " + selected.size + " selected…" : "Recover selected";
+  const n = { all: 0, deleted: 0, existing: 0, unknown: 0 };
+  for (const it of items) if (it) { n.all++; n[it.status] = (n[it.status] || 0) + 1; }
+  $("cAll").textContent = n.all; $("cDeleted").textContent = n.deleted;
+  $("cExisting").textContent = n.existing; $("cUnknown").textContent = n.unknown;
+  $("sFound").textContent = n.all.toLocaleString();
 }
-function matchesFilter(el) { const f = $("filter").value; return f === "all" || el.dataset.status === f; }
-function setAll(on) {
-  document.querySelectorAll(".tile").forEach((el, i) => {
-    if (on && el.style.display === "none") return;  // "Select all" = all shown photos
-    const cb = el.querySelector("input"); cb.checked = on; el.classList.toggle("sel", on);
-    on ? selected.add(items[i].id) : selected.delete(items[i].id);
-  });
-  updateCounts();
+document.querySelectorAll(".chip").forEach(ch => ch.onclick = () => {
+  state.filter = ch.dataset.f;
+  document.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === ch));
+  applyView();
+});
+$("sort").onchange = () => { state.sort = $("sort").value; store.set("sort", state.sort); applyView(); };
+$("zoom").oninput = () => { document.documentElement.style.setProperty("--tile-size", $("zoom").value + "px"); store.set("zoom", $("zoom").value); };
+
+// ---------------------------------------------------------------- selection
+function setSel(id, on) {
+  on ? selected.add(id) : selected.delete(id);
+  const el = tiles.get(id); if (el) el.classList.toggle("sel", on);
 }
-$("filter").onchange = () => {
-  document.querySelectorAll(".tile").forEach(el => { el.style.display = matchesFilter(el) ? "" : "none"; });
+function toggle(id, range) {
+  if (range && state.anchor !== null) {
+    const order = visibleOrder(), a = order.indexOf(state.anchor), b = order.indexOf(id);
+    if (a !== -1 && b !== -1) {
+      const on = !selected.has(id) || selected.has(state.anchor);
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) setSel(order[i], on);
+      state.anchor = id; updateSelection(); return;
+    }
+  }
+  setSel(id, !selected.has(id));
+  state.anchor = id; updateSelection();
+}
+function updateSelection() {
+  let bytes = 0; for (const id of selected) bytes += items[id] ? items[id].length : 0;
+  const n = selected.size;
+  $("selsummary").textContent = n + " selected · " + fmtSize(bytes);
+  $("recover").textContent = "Recover " + n + " photo" + (n === 1 ? "" : "s");
+  $("actionbar").classList.toggle("show", n > 0);
+  $("grid").classList.toggle("selecting", n > 0);
+  const vis = visibleOrder();
+  const allSel = vis.length && vis.every(id => selected.has(id));
+  $("selall").textContent = allSel ? "Deselect all" : "Select all";
+  if ($("lightbox").classList.contains("show")) syncViewerSel();
+}
+$("selall").onclick = () => {
+  const vis = visibleOrder();
+  const allSel = vis.length && vis.every(id => selected.has(id));
+  vis.forEach(id => setSel(id, !allSel)); updateSelection();
 };
-$("selall").onclick = () => setAll(true);
-$("selnone").onclick = () => setAll(false);
+$("clearsel").onclick = () => { [...selected].forEach(id => setSel(id, false)); updateSelection(); };
 
-function openLightbox(it) {
-  $("lbimg").src = "/img/" + it.id + "?g=" + gen + "&t=" + T;
-  $("lbcap").textContent = (it.name || "Photo " + (it.id + 1)) + (it.date ? " · taken " + it.date : "") + " · " + it.width + "×" + it.height + " · " + fmtSize(it.length) + " · full resolution (click to close)";
+// ---------------------------------------------------------------- viewer
+function openViewer(id) {
+  const order = visibleOrder();
+  state.lbIndex = order.indexOf(id);
+  if (state.lbIndex === -1) return;
   $("lightbox").classList.add("show");
+  showViewer();
 }
-$("lightbox").onclick = () => { $("lightbox").classList.remove("show"); $("lbimg").src = ""; };
-document.addEventListener("keydown", e => { if (e.key === "Escape") $("lightbox").onclick(); });
+function showViewer() {
+  const order = visibleOrder(), id = order[state.lbIndex], it = items[id];
+  if (it === undefined) return closeViewer();
+  $("lbloading").classList.remove("hidden");
+  const img = $("lbimg");
+  img.onload = () => $("lbloading").classList.add("hidden");
+  img.onerror = () => { $("lbloading").textContent = "Couldn't load this photo."; };
+  $("lbloading").textContent = "Loading full resolution…";
+  img.src = "/img/" + id + "?g=" + state.gen + "&t=" + T;
+  $("lbname").textContent = label(it);
+  const bits = [it.width + "×" + it.height, fmtSize(it.length), { deleted: "Deleted", existing: "Existing", unknown: "Found by deep scan" }[it.status]];
+  if (it.date) bits.push("taken " + prettyDate(it.date));
+  if (it.name && it.folder && it.folder !== "/") bits.push(it.folder);
+  if (it.pieces > 1) bits.push("rebuilt from " + it.pieces + " pieces");
+  bits.push((state.lbIndex + 1) + " of " + order.length);
+  $("lbcap").textContent = bits.join(" · ");
+  $("lbprev").classList.toggle("hidden", state.lbIndex <= 0);
+  $("lbnext").classList.toggle("hidden", state.lbIndex >= order.length - 1);
+  syncViewerSel();
+}
+function syncViewerSel() {
+  const id = visibleOrder()[state.lbIndex];
+  const on = selected.has(id);
+  $("lbsel").textContent = on ? "✓ Selected" : "Select";
+  $("lbsel").classList.toggle("on", on);
+}
+function closeViewer() { $("lightbox").classList.remove("show"); $("lbimg").removeAttribute("src"); }
+function step(d) {
+  const n = visibleOrder().length;
+  const next = state.lbIndex + d;
+  if (next >= 0 && next < n) { state.lbIndex = next; showViewer(); }
+}
+$("lbprev").onclick = e => { e.stopPropagation(); step(-1); };
+$("lbnext").onclick = e => { e.stopPropagation(); step(1); };
+$("lbclose").onclick = closeViewer;
+$("lbsel").onclick = e => { e.stopPropagation(); const id = visibleOrder()[state.lbIndex]; setSel(id, !selected.has(id)); state.anchor = id; updateSelection(); };
+$("lightbox").addEventListener("click", e => { if (e.target === $("lightbox")) closeViewer(); });
+document.addEventListener("keydown", e => {
+  if ($("lightbox").classList.contains("show")) {
+    if (e.key === "Escape") closeViewer();
+    else if (e.key === "ArrowLeft") step(-1);
+    else if (e.key === "ArrowRight") step(1);
+    else if (e.key === " ") { e.preventDefault(); $("lbsel").click(); }
+    return;
+  }
+  if ($("saveModal").classList.contains("show")) { if (e.key === "Escape") $("closeSave").click(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !$("viewScan").classList.contains("hidden")
+      && document.activeElement.tagName !== "INPUT") { e.preventDefault(); $("selall").click(); }
+  if (e.key === "Escape" && selected.size) $("clearsel").click();
+});
 
+// ---------------------------------------------------------------- save
 $("recover").onclick = async () => {
-  $("saveerr").textContent = ""; $("saveprog").style.display = "none"; $("reveal").style.display = "none";
-  $("doSave").style.display = ""; $("doSave").disabled = false; $("closeSave").textContent = "Cancel";
-  $("saveinfo").textContent = selected.size + " photo(s) will be saved byte-for-byte at full original quality.";
-  if (!$("dest").value) { try { $("dest").value = (await api("/api/default-folder", {})).path; } catch (e) {} }
+  $("saveerr").textContent = ""; $("saveprog").classList.add("hidden"); $("reveal").classList.add("hidden");
+  $("doSave").classList.remove("hidden"); $("doSave").disabled = false;
+  $("closeSave").textContent = "Cancel"; $("closeSave").disabled = false;
+  let bytes = 0; for (const id of selected) bytes += items[id].length;
+  $("saveinfo").textContent = selected.size + " photo" + (selected.size === 1 ? "" : "s") + " (" + fmtSize(bytes) +
+    ") will be saved byte-for-byte at full original quality." + (state.polling ? " The scan keeps running while you save." : "");
+  if (!$("dest").value) {
+    const last = store.get("dest");
+    if (last) $("dest").value = last;
+    else { try { $("dest").value = (await api("/api/default-folder", {})).path; } catch (e) {} }
+  }
   $("saveModal").classList.add("show");
+  $("doSave").focus();
 };
 $("browse").onclick = async () => {
   $("browse").disabled = true;
@@ -342,44 +766,60 @@ $("browse").onclick = async () => {
   catch (e) { $("saveerr").textContent = e.message; }
   finally { $("browse").disabled = false; }
 };
-$("closeSave").onclick = () => { if (!savePoll) $("saveModal").classList.remove("show"); };
+$("closeSave").onclick = () => { if (!state.savePoll) $("saveModal").classList.remove("show"); };
 $("doSave").onclick = async () => {
   $("saveerr").textContent = "";
-  const ids = items.filter(it => selected.has(it.id)).map(it => it.id);
+  const ids = items.filter(it => it && selected.has(it.id)).map(it => it.id);
   try { await api("/api/recover", { ids, dest: $("dest").value }); }
   catch (e) { $("saveerr").textContent = e.message; return; }
-  $("doSave").disabled = true; $("closeSave").disabled = true; $("saveprog").style.display = "block";
-  savePoll = setInterval(async () => {
+  store.set("dest", $("dest").value);
+  $("doSave").disabled = true; $("closeSave").disabled = true;
+  $("saveprog").classList.remove("hidden"); $("sbar").style.width = "0";
+  $("stext").textContent = "Saving…";
+  state.savePoll = setInterval(async () => {
     try {
-      const r = (await api("/api/status?since=" + since)).recover;
+      const r = (await api("/api/status?since=" + state.since)).recover;
       if (!r) return;
       $("sbar").style.width = (100 * (r.saved + r.failed) / r.total).toFixed(1) + "%";
       $("stext").textContent = "Saved " + r.saved + " of " + r.total + (r.failed ? " · " + r.failed + " failed" : "");
       if (r.done) {
-        clearInterval(savePoll); savePoll = null;
-        $("closeSave").disabled = false; $("closeSave").textContent = "Close"; $("doSave").style.display = "none";
+        clearInterval(state.savePoll); state.savePoll = null;
+        $("closeSave").disabled = false; $("closeSave").textContent = "Done"; $("doSave").classList.add("hidden");
         if (r.error) $("saveerr").textContent = r.error;
-        if (r.saved) { $("stext").innerHTML = '<span class="okc">Saved ' + r.saved + ' photo(s) to ' + esc(r.dest) + '</span>' + (r.failed ? " · " + r.failed + " failed" : "") + (r.damaged ? ' · <span class="warn">' + r.damaged + " had unreadable parts (may show grey areas)</span>" : ""); $("reveal").style.display = ""; }
+        if (r.saved) {
+          $("stext").innerHTML = '<span style="color:var(--ok);font-weight:600">✓ Saved ' + r.saved + ' photo' + (r.saved === 1 ? "" : "s") +
+            '</span> to ' + esc(r.dest) + (r.failed ? " · " + r.failed + " failed" : "") +
+            (r.damaged ? ' · <span style="color:var(--warn)">' + r.damaged + " had unreadable parts (may show grey areas)</span>" : "");
+          $("reveal").classList.remove("hidden");
+          [...selected].forEach(id => setSel(id, false)); updateSelection();
+        }
       }
     } catch (e) { $("saveerr").textContent = e.message; }
   }, 400);
 };
 $("reveal").onclick = () => api("/api/reveal", {}).catch(() => {});
+
 $("quit").onclick = async () => {
-  if (!confirm("Quit JPEG Recovery?")) return;
+  if (state.polling && !confirm("A scan is running. Quit JPEG Recovery anyway?")) return;
+  if (!state.polling && !confirm("Quit JPEG Recovery?")) return;
   try { await api("/api/quit", {}); } catch (e) {}
-  document.body.innerHTML = '<main><div class="panel">JPEG Recovery has stopped. You can close this tab.</div></main>';
+  stopDevicePolling(); clearInterval(state.polling);
+  document.body.innerHTML = '<main><div class="card" style="padding:28px;text-align:center;margin-top:40px"><h2 style="margin:0 0 6px">JPEG Recovery has stopped</h2><p class="muted" style="margin:0">You can close this tab.</p></div></main>';
 };
 
-loadDevices();
-setInterval(() => api("/api/ping", {}).catch(() => {}), 60000);
-// Resume view if the page is reloaded during/after a scan.
-api("/api/status?since=0").then(s => {
-  if (s.state === "idle") return;
-  $("progress").style.display = "block"; $("results").style.display = "block";
-  if (s.state === "scanning") { polling = setInterval(poll, 600); updateScanBtn(); }
-  poll();
-}).catch(() => {});
+// ---------------------------------------------------------------- start
+(function init() {
+  const z = store.get("zoom"); if (z) { $("zoom").value = z; $("zoom").oninput(); }
+  const so = store.get("sort"); if (so) { $("sort").value = so; state.sort = so; }
+  setInterval(() => api("/api/ping", {}).catch(() => {}), 60000);
+  api("/api/status?since=0").then(s => {
+    if (s.state === "idle") { loadDevices(false); startDevicePolling(); return; }
+    $("driveLabel").textContent = s.path || "";
+    showScanView();
+    if (s.state === "scanning") { state.polling = setInterval(poll, 700); }
+    poll().then(() => { if (state.sort !== "pos") applyView(); });
+  }).catch(() => { loadDevices(false); startDevicePolling(); });
+})();
 </script>
 </body>
 </html>
