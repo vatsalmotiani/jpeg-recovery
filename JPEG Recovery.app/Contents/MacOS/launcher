@@ -61,8 +61,8 @@ on run argv
   set logFile to item 3 of argv
   set cmd to "JPEG_RECOVERY_PORT=" & item 4 of argv & " JPEG_RECOVERY_TOKEN=" & item 5 of argv & ¬
     " JPEG_RECOVERY_UID=" & item 6 of argv & " JPEG_RECOVERY_GID=" & item 7 of argv & ¬
-    " JPEG_RECOVERY_NO_BROWSER=1 nohup " & quoted form of py & " -I " & quoted form of appPy & ¬
-    " >> " & quoted form of logFile & " 2>&1 &"
+    " JPEG_RECOVERY_NO_BROWSER=1 JPEG_RECOVERY_DAEMON=1 " & quoted form of py & " -I " & quoted form of appPy & ¬
+    " < /dev/null >> " & quoted form of logFile & " 2>&1"
   do shell script cmd with prompt "JPEG Recovery needs your password to read the SD card or pendrive. Nothing is written to it." with administrator privileges
 end run
 OSA

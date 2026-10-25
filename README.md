@@ -29,6 +29,15 @@ Drag it to your Applications folder if you like.
 > curl -L https://github.com/vatsalmotiani/jpeg-recovery/archive/refs/heads/main.tar.gz | tar xz && open jpeg-recovery-main
 > ```
 
+**Or run it straight from Terminal** (same app, no double-clicking):
+
+```bash
+git clone https://github.com/vatsalmotiani/jpeg-recovery.git && cd jpeg-recovery && ./run.sh
+```
+
+Next time, run `cd jpeg-recovery && ./run.sh`. Keep the Terminal window open while you use the app,
+and press `Ctrl+C` there to stop it. To update to the latest version, run `cd jpeg-recovery && git pull`.
+
 **First launch:** the app asks for your **Mac password**. It needs admin rights to read the card's
 raw data; nothing is written to the card. The app then opens in your web browser.
 

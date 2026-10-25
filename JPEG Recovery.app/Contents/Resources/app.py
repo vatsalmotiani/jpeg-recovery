@@ -5,6 +5,7 @@ Started by "JPEG Recovery.app" (or ./run.sh). It needs admin rights to read the
 raw data on the card. Only Python's standard library is used.
 """
 
+import errno
 import fcntl
 import json
 import os
@@ -101,15 +102,45 @@ DKIOCGETBLOCKCOUNT = 0x40086419
 
 
 def source_geometry(path):
-    """(size_in_bytes, sector_size)."""
+    """(size_in_bytes, sector_size). Tries several methods, since some card
+    readers don't answer every kind of size query."""
     st = os.stat(path)
     if not (stat.S_ISCHR(st.st_mode) or stat.S_ISBLK(st.st_mode)):  # image file
         return st.st_size, 512
     fd = os.open(path, os.O_RDONLY)
     try:
-        bs = struct.unpack("I", fcntl.ioctl(fd, DKIOCGETBLOCKSIZE, b"\0" * 4))[0]
-        bc = struct.unpack("Q", fcntl.ioctl(fd, DKIOCGETBLOCKCOUNT, b"\0" * 8))[0]
-        return bs * bc, bs
+        # 1. Ask the disk driver directly.
+        try:
+            bs = struct.unpack("I", fcntl.ioctl(fd, DKIOCGETBLOCKSIZE, b"\0" * 4))[0]
+            bc = struct.unpack("Q", fcntl.ioctl(fd, DKIOCGETBLOCKCOUNT, b"\0" * 8))[0]
+            if bs and bc:
+                return bs * bc, bs
+        except OSError:
+            pass
+        # 2. Ask diskutil.
+        m = re.match(r"r?(disk\d+(?:s\d+)?)$", os.path.basename(path))
+        if m:
+            info = _diskutil_plist("info", m.group(1))
+            size = info.get("TotalSize") or info.get("Size") or 0
+            bs = info.get("DeviceBlockSize") or 512
+            if size:
+                return int(size), int(bs)
+        # 3. Find the last readable 4 KiB block (binary search, ~40 tiny reads).
+        def readable(off):
+            try:
+                return len(os.pread(fd, 4096, off)) == 4096
+            except OSError:
+                return False
+        if readable(0):
+            lo, hi = 0, 1 << 30  # in 4 KiB blocks: up to 4 TiB
+            while hi - lo > 1:
+                mid = (lo + hi) // 2
+                if readable(mid * 4096):
+                    lo = mid
+                else:
+                    hi = mid
+            return (lo + 1) * 4096, 512
+        raise OSError(errno.EIO, "Could not read the drive's size")
     finally:
         os.close(fd)
 
@@ -498,7 +529,21 @@ def free_port():
     return p
 
 
+def _daemonize():
+    """Detach from the launcher (used by the .app; replaces nohup)."""
+    if os.fork() > 0:
+        os._exit(0)
+    os.setsid()
+    if os.fork() > 0:
+        os._exit(0)
+    devnull = os.open(os.devnull, os.O_RDWR)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+
+
 def main():
+    if os.environ.get("JPEG_RECOVERY_DAEMON"):
+        _daemonize()
     if sys.platform != "darwin":
         print("This tool is for macOS.")
     port = int(os.environ.get("JPEG_RECOVERY_PORT") or free_port())
